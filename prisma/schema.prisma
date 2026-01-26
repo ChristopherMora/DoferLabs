@@ -1,0 +1,157 @@
+// Prisma schema para Dofer Labs
+// Arquitectura preparada para: eventos, users, planes, y resultados guardados
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// USERS & AUTH (preparado para Next-Auth)
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  
+  // Tier & monetización
+  tier          String    @default("free") // free, pro, enterprise
+  
+  // Relaciones
+  accounts      Account[]
+  sessions      Session[]
+  savedResults  SavedResult[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================
+// EVENTS (analytics propio, sin PII)
+// ============================================
+
+model Event {
+  id          String   @id @default(cuid())
+  
+  // Qué pasó
+  eventType   String   // tool_opened, tool_executed, result_viewed, pro_prompt_shown, etc.
+  toolId      String?  // ID de la herramienta (si aplica)
+  
+  // Contexto (anónimo en MVP, puede tener userId después)
+  sessionId   String?  // Session fingerprint anónimo
+  userId      String?  // Opcional, solo si user está autenticado
+  
+  // Metadata flexible
+  metadata    Json?    // Inputs, outputs, errores, etc.
+  
+  // Tracking
+  createdAt   DateTime @default(now())
+  
+  @@index([eventType, toolId])
+  @@index([createdAt])
+  @@index([userId])
+  @@map("events")
+}
+
+// ============================================
+// SAVED RESULTS (para usuarios Pro)
+// ============================================
+
+model SavedResult {
+  id          String   @id @default(cuid())
+  
+  // Owner
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Tool info
+  toolId      String
+  toolName    String
+  
+  // Datos guardados
+  inputs      Json     // Inputs del usuario
+  outputs     Json     // Resultados generados
+  
+  // Metadata
+  name        String?  // Nombre personalizado del usuario
+  tags        String[] // Tags para organizar
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId, toolId])
+  @@index([createdAt])
+  @@map("saved_results")
+}
+
+// ============================================
+// SOFT OPT-INS (captación suave)
+// ============================================
+
+model Lead {
+  id          String   @id @default(cuid())
+  
+  // Contacto
+  email       String?
+  phone       String?
+  
+  // Origen
+  source      String   // tool_id, landing_page, etc.
+  context     Json?    // Metadata sobre qué herramienta usó, etc.
+  
+  // Estado
+  subscribed  Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([email])
+  @@index([createdAt])
+  @@map("leads")
+}
