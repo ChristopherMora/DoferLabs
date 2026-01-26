@@ -1,7 +1,8 @@
 'use client'
 
-import { use, Suspense } from 'react'
+import { use, Suspense, lazy } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { registerAllTools, getTool } from '@/tools'
 import { useTrackToolOpened } from '@/lib/analytics/hooks'
 
@@ -35,8 +36,18 @@ function ToolContent({ toolId }: { toolId: string }) {
     )
   }
 
-  // Lazy load del componente
-  const ToolComponent = use(tool.component().then(mod => mod.default))
+  // Lazy load del componente usando dynamic de Next.js
+  const ToolComponent = dynamic(() => tool.component(), {
+    loading: () => (
+      <div className="flex items-center justify-center py-20">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Cargando herramienta...</p>
+        </div>
+      </div>
+    ),
+    ssr: false
+  })
 
   return (
     <div className="min-h-screen bg-gray-50">
