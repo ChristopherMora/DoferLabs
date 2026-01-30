@@ -155,3 +155,29 @@ model Lead {
   @@index([createdAt])
   @@map("leads")
 }
+
+// ============================================
+// SUBSCRIBERS (notificaciones de nuevas herramientas)
+// ============================================
+
+model Subscriber {
+  id          String   @id @default(cuid())
+  
+  // Contacto (al menos uno requerido)
+  contact     String   @unique // email o whatsapp
+  type        String   // "email" o "whatsapp"
+  
+  // Estado
+  active      Boolean  @default(true)
+  verified    Boolean  @default(false)
+  
+  // Metadata
+  source      String   @default("homepage") // de dónde se suscribió
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([active])
+  @@index([createdAt])
+  @@map("subscribers")
+}

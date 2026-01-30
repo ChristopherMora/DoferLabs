@@ -53,24 +53,32 @@ class EventTracker {
   }
 
   /**
-   * Envía evento al backend (preparado, no implementado en MVP)
+   * Envía evento al backend
    */
   private async sendToBackend(event: ToolEvent) {
     try {
-      // Descomentarwhen backend esté listo
-      /*
-      await fetch('/api/events', {
+      // Enviar al backend de forma asíncrona
+      fetch('/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...event,
+          eventType: event.eventType,
+          toolId: event.toolId,
           sessionId: this.sessionId,
+          metadata: event.metadata,
         }),
+        keepalive: true, // Permite que la petición continúe aunque se cierre la página
+      }).catch(error => {
+        // Silently fail - no romper UX por analytics
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Analytics error:', error)
+        }
       })
-      */
     } catch (error) {
       // Silently fail - no romper UX por analytics
-      console.error('Analytics error:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Analytics error:', error)
+      }
     }
   }
 

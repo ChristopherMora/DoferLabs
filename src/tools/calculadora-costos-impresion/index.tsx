@@ -1,17 +1,115 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, Suspense, useEffect } from 'react'
 import JSZip from 'jszip'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Stage, Center } from '@react-three/drei'
 import * as THREE from 'three'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
+import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { useTrackEvent } from '@/lib/analytics/hooks'
+import { useToolTracking } from '@/lib/analytics/hooks'
+import { validateFile, ALLOWED_EXTENSIONS } from '@/lib/security/file-validation'
 import type { ToolProps } from '../types'
 import { calculatorInputSchema, type CalculatorInput, type CalculatorResult } from './schema'
 import { config } from './tool.config'
+
+// Base de datos de consumo de energía por impresora (en Watts promedio para PLA)
+// Fuente: Bambu Lab Wiki y mediciones de la comunidad
+const PRINTER_POWER_DATABASE: Record<string, { watts: number; brand: string; fullName: string }> = {
+  // Bambu Lab
+  'p1s': { watts: 105, brand: 'Bambu Lab', fullName: 'Bambu Lab P1S' },
+  'p1p': { watts: 110, brand: 'Bambu Lab', fullName: 'Bambu Lab P1P' },
+  'p2s': { watts: 200, brand: 'Bambu Lab', fullName: 'Bambu Lab P2S' },
+  'x1': { watts: 105, brand: 'Bambu Lab', fullName: 'Bambu Lab X1' },
+  'x1c': { watts: 105, brand: 'Bambu Lab', fullName: 'Bambu Lab X1 Carbon' },
+  'x1e': { watts: 185, brand: 'Bambu Lab', fullName: 'Bambu Lab X1E' },
+  'a1': { watts: 95, brand: 'Bambu Lab', fullName: 'Bambu Lab A1' },
+  'a1 mini': { watts: 80, brand: 'Bambu Lab', fullName: 'Bambu Lab A1 Mini' },
+  'a1mini': { watts: 80, brand: 'Bambu Lab', fullName: 'Bambu Lab A1 Mini' },
+  'h2s': { watts: 200, brand: 'Bambu Lab', fullName: 'Bambu Lab H2S' },
+  'h2d': { watts: 197, brand: 'Bambu Lab', fullName: 'Bambu Lab H2D' },
+  'h2c': { watts: 200, brand: 'Bambu Lab', fullName: 'Bambu Lab H2C' },
+  // Creality
+  'ender 3': { watts: 270, brand: 'Creality', fullName: 'Creality Ender 3' },
+  'ender 3 v2': { watts: 270, brand: 'Creality', fullName: 'Creality Ender 3 V2' },
+  'ender 3 v3': { watts: 350, brand: 'Creality', fullName: 'Creality Ender 3 V3' },
+  'ender 3 s1': { watts: 300, brand: 'Creality', fullName: 'Creality Ender 3 S1' },
+  'ender 3 pro': { watts: 270, brand: 'Creality', fullName: 'Creality Ender 3 Pro' },
+  'ender 5': { watts: 350, brand: 'Creality', fullName: 'Creality Ender 5' },
+  'cr-10': { watts: 400, brand: 'Creality', fullName: 'Creality CR-10' },
+  'k1': { watts: 350, brand: 'Creality', fullName: 'Creality K1' },
+  'k1 max': { watts: 450, brand: 'Creality', fullName: 'Creality K1 Max' },
+  'k1c': { watts: 350, brand: 'Creality', fullName: 'Creality K1C' },
+  'k2 plus': { watts: 500, brand: 'Creality', fullName: 'Creality K2 Plus' },
+  // Prusa
+  'prusa mk3': { watts: 120, brand: 'Prusa', fullName: 'Prusa MK3' },
+  'prusa mk3s': { watts: 120, brand: 'Prusa', fullName: 'Prusa MK3S+' },
+  'prusa mk4': { watts: 150, brand: 'Prusa', fullName: 'Prusa MK4' },
+  'prusa mini': { watts: 100, brand: 'Prusa', fullName: 'Prusa Mini' },
+  'prusa xl': { watts: 250, brand: 'Prusa', fullName: 'Prusa XL' },
+  'prusa core one': { watts: 150, brand: 'Prusa', fullName: 'Prusa Core One' },
+  // Anycubic
+  'kobra': { watts: 350, brand: 'Anycubic', fullName: 'Anycubic Kobra' },
+  'kobra 2': { watts: 400, brand: 'Anycubic', fullName: 'Anycubic Kobra 2' },
+  'kobra 3': { watts: 450, brand: 'Anycubic', fullName: 'Anycubic Kobra 3' },
+  'vyper': { watts: 350, brand: 'Anycubic', fullName: 'Anycubic Vyper' },
+  // Elegoo
+  'neptune 3': { watts: 350, brand: 'Elegoo', fullName: 'Elegoo Neptune 3' },
+  'neptune 4': { watts: 450, brand: 'Elegoo', fullName: 'Elegoo Neptune 4' },
+  'neptune 4 pro': { watts: 500, brand: 'Elegoo', fullName: 'Elegoo Neptune 4 Pro' },
+  // Voron (DIY)
+  'voron 0': { watts: 150, brand: 'Voron', fullName: 'Voron 0.2' },
+  'voron 2.4': { watts: 400, brand: 'Voron', fullName: 'Voron 2.4' },
+  'voron trident': { watts: 350, brand: 'Voron', fullName: 'Voron Trident' },
+  // Artillery
+  'sidewinder': { watts: 400, brand: 'Artillery', fullName: 'Artillery Sidewinder' },
+  'genius': { watts: 300, brand: 'Artillery', fullName: 'Artillery Genius' },
+  // Flashforge
+  'adventurer': { watts: 200, brand: 'Flashforge', fullName: 'Flashforge Adventurer' },
+  'creator': { watts: 300, brand: 'Flashforge', fullName: 'Flashforge Creator' },
+  // Genéricos por tipo
+  'i3': { watts: 250, brand: 'Generic', fullName: 'Impresora tipo i3' },
+  'corexy': { watts: 350, brand: 'Generic', fullName: 'Impresora CoreXY' },
+  'delta': { watts: 300, brand: 'Generic', fullName: 'Impresora Delta' },
+}
+
+// Función para buscar consumo de impresora
+function findPrinterPower(printerName: string): { watts: number; fullName: string } | null {
+  const normalizedName = printerName.toLowerCase().trim()
+  
+  // Búsqueda exacta primero
+  if (PRINTER_POWER_DATABASE[normalizedName]) {
+    return PRINTER_POWER_DATABASE[normalizedName]
+  }
+  
+  // Búsqueda parcial
+  for (const [key, data] of Object.entries(PRINTER_POWER_DATABASE)) {
+    if (normalizedName.includes(key) || key.includes(normalizedName)) {
+      return data
+    }
+  }
+  
+  // Búsqueda por palabras clave de marca
+  const brandPatterns: [RegExp, string][] = [
+    [/bambu|bbl/i, 'a1'], // Por defecto para Bambu
+    [/creality|ender/i, 'ender 3'],
+    [/prusa/i, 'prusa mk4'],
+    [/anycubic|kobra/i, 'kobra 2'],
+    [/elegoo|neptune/i, 'neptune 4'],
+    [/voron/i, 'voron 2.4'],
+    [/artillery/i, 'sidewinder'],
+  ]
+  
+  for (const [pattern, defaultKey] of brandPatterns) {
+    if (pattern.test(normalizedName)) {
+      return PRINTER_POWER_DATABASE[defaultKey]
+    }
+  }
+  
+  return null
+}
 
 // Componente Tooltip moderno
 function InfoTooltip({ text }: { text: string }) {
@@ -89,8 +187,62 @@ function StlViewer({
   )
 }
 
+// Componente para visualizar modelo 3MF en 3D
+function ThreeMFViewer({ 
+  group, 
+  rotation
+}: { 
+  group: THREE.Group
+  rotation: [number, number, number]
+}) {
+  return (
+    <Canvas 
+      camera={{ position: [0, 0, 200], fov: 45 }} 
+      style={{ height: '400px', background: '#f8fafc' }}
+      dpr={[1, 2]}
+    >
+      <Suspense fallback={null}>
+        <ambientLight intensity={0.6} />
+        <directionalLight position={[10, 10, 5]} intensity={1} />
+        <directionalLight position={[-10, -10, -5]} intensity={0.5} />
+        <directionalLight position={[0, 10, 0]} intensity={0.3} />
+        
+        <Center>
+          <group rotation={rotation}>
+            <primitive object={group.clone()} />
+          </group>
+        </Center>
+        
+        {/* Plano de la cama de impresión */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1, 0]} receiveShadow>
+          <planeGeometry args={[500, 500]} />
+          <meshStandardMaterial 
+            color="#94a3b8" 
+            transparent 
+            opacity={0.15} 
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        
+        {/* Grid helper */}
+        <gridHelper args={[200, 20, '#cbd5e1', '#e2e8f0']} position={[0, -0.9, 0]} />
+        
+        <OrbitControls 
+          enablePan={true} 
+          enableZoom={true} 
+          enableRotate={true}
+          maxDistance={500}
+          minDistance={10}
+          enableDamping={true}
+          dampingFactor={0.05}
+        />
+      </Suspense>
+    </Canvas>
+  )
+}
+
 export default function CalculadoraCostosImpresion({ onComplete, onError }: ToolProps) {
-  const tracker = useTrackEvent()
+  const { trackExecution, trackResult, trackExport, trackError, trackCustom } = useToolTracking(config.id)
   
   // State para inputs - vacíos hasta que se cargue un archivo del slicer
   const [inputs, setInputs] = useState<CalculatorInput>({
@@ -113,9 +265,10 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
   const [previewImage, setPreviewImage] = useState<string>('')
   const [printerName, setPrinterName] = useState<string>('')
   
-  // State para STL
+  // State para STL y 3MF
   const [cotizacionMode, setCotizacionMode] = useState<'gcode' | 'stl'>('gcode')
   const [stlGeometry, setStlGeometry] = useState<THREE.BufferGeometry | null>(null)
+  const [threeMFGroup, setThreeMFGroup] = useState<THREE.Group | null>(null)
   const [stlVolume, setStlVolume] = useState<number>(0)
   const [stlDimensions, setStlDimensions] = useState({ x: 0, y: 0, z: 0 })
   const [infillDensity, setInfillDensity] = useState<number>(20)
@@ -138,6 +291,14 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     setSlicerNotes('')
     setPreviewImage('')
     setPrinterName('')
+    setThreeMFGroup(null) // Limpiar modelo 3MF anterior
+    
+    // Track inicio de importación
+    const fileExtension = file.name.toLowerCase().split('.').pop() || 'unknown'
+    trackCustom('file_import_started', {
+      fileType: fileExtension,
+      fileSize: file.size,
+    })
     
     try {
       let text = ''
@@ -159,20 +320,25 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           // Los .3mf tienen un archivo Metadata/Slic3r_PE.config o similar con la info
           // También buscar en .gcode dentro del .3mf si existe
           let metadata = ''
+          let bestPreview: { name: string; size: number; blob?: Blob } | null = null
           
           for (const [fileName, zipFile] of Object.entries(zip.files)) {
             if (!zipFile.dir) {
               console.log('📄 Leyendo archivo interno:', fileName)
               
-              // Extraer imagen preview (thumbnail.png o similar)
-              if (fileName.toLowerCase().includes('thumbnail') || 
-                  fileName.toLowerCase().includes('preview') ||
-                  fileName.toLowerCase().endsWith('.png')) {
+              // Extraer la MEJOR imagen preview (la más grande)
+              // Bambu Studio guarda: Metadata/plate_1.png, Metadata/top_1.png, etc.
+              if (fileName.toLowerCase().endsWith('.png') || 
+                  fileName.toLowerCase().endsWith('.jpg') ||
+                  fileName.toLowerCase().endsWith('.jpeg')) {
                 try {
                   const blob = await zipFile.async('blob')
-                  const imageUrl = URL.createObjectURL(blob)
-                  setPreviewImage(imageUrl)
-                  console.log('🖼️ Imagen preview encontrada:', fileName)
+                  console.log('🖼️ Imagen encontrada:', fileName, 'tamaño:', blob.size)
+                  
+                  // Guardar la imagen más grande (mejor calidad)
+                  if (!bestPreview || blob.size > bestPreview.size) {
+                    bestPreview = { name: fileName, size: blob.size, blob }
+                  }
                 } catch (err) {
                   console.warn('⚠️ Error cargando imagen:', err)
                 }
@@ -190,15 +356,72 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
               
               // Acumular metadata y archivos de configuración
               if (fileName.includes('metadata') || fileName.includes('config') || 
-                  fileName.toLowerCase().endsWith('.xml')) {
+                  fileName.toLowerCase().endsWith('.xml') ||
+                  fileName.includes('Metadata') || fileName.includes('3D/')) {
                 metadata += content + '\n'
               }
             }
           }
           
+          // Usar la mejor imagen de preview
+          if (bestPreview?.blob) {
+            const imageUrl = URL.createObjectURL(bestPreview.blob)
+            setPreviewImage(imageUrl)
+            console.log('🖼️ Usando mejor preview:', bestPreview.name, 'tamaño:', bestPreview.size)
+          }
+          
           // Si no encontramos gcode, usar metadata
           if (!text) {
             text = metadata
+          }
+          
+          // Cargar modelo 3D del archivo 3MF para visualización
+          try {
+            console.log('🎨 Intentando cargar modelo 3D del archivo 3MF...')
+            const loader = new ThreeMFLoader()
+            const arrayBuffer = await file.arrayBuffer()
+            console.log('🎨 ArrayBuffer listo, tamaño:', arrayBuffer.byteLength)
+            const group = loader.parse(arrayBuffer)
+            console.log('🎨 Resultado del parse:', group, 'children:', group?.children?.length)
+            
+            if (group && group.children.length > 0) {
+              // Centrar y escalar el modelo
+              const box = new THREE.Box3().setFromObject(group)
+              const center = box.getCenter(new THREE.Vector3())
+              const size = box.getSize(new THREE.Vector3())
+              
+              group.position.sub(center)
+              
+              // Guardar dimensiones
+              setStlDimensions({ 
+                x: Math.round(size.x * 100) / 100, 
+                y: Math.round(size.y * 100) / 100, 
+                z: Math.round(size.z * 100) / 100 
+              })
+              
+              // Calcular volumen aproximado
+              let totalVolume = 0
+              group.traverse((child) => {
+                if (child instanceof THREE.Mesh && child.geometry) {
+                  const geo = child.geometry
+                  if (!geo.index) {
+                    geo.computeBoundingBox()
+                    const geoBox = geo.boundingBox
+                    if (geoBox) {
+                      const geoSize = geoBox.getSize(new THREE.Vector3())
+                      totalVolume += geoSize.x * geoSize.y * geoSize.z * 0.3 // Aproximación
+                    }
+                  }
+                }
+              })
+              
+              setThreeMFGroup(group)
+              setStlVolume(Math.round(totalVolume * 100) / 100)
+              console.log('🎨 Modelo 3MF cargado para visualización, meshes:', group.children.length)
+            }
+          } catch (loadError) {
+            console.warn('⚠️ No se pudo cargar modelo 3D del 3MF:', loadError)
+            // No es crítico, continuamos sin visualización 3D
           }
           
           console.log('📝 Contenido extraído, longitud:', text.length)
@@ -265,42 +488,198 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         console.log('🔢 Múltiples objetos detectados:', objectCount)
       }
       
-      // EXTRAER NOMBRE DE IMPRESORA
-      for (const line of commentLines) {
-        const lowerLine = line.toLowerCase()
-        // Bambu Studio: "; printer_model = Bambu Lab A1"
-        // Cura: "; Machine name: Ender 3"
-        if (lowerLine.includes('printer_model') || lowerLine.includes('printer') || 
-            lowerLine.includes('machine name') || lowerLine.includes('machine:')) {
-          const match = line.match(/(?:printer_model|printer|machine[\s_]name|machine)\s*[=:]\s*([^;\n]+)/i)
+      // ========================================
+      // EXTRAER NOMBRE DE IMPRESORA Y CONSUMO
+      // ========================================
+      let detectedPrinter = ''
+      let detectedPowerWatts = 0
+      
+      // Patrones específicos por slicer
+      const printerPatterns = [
+        // Bambu Studio: "; printer_model = Bambu Lab P1S 0.4mm Nozzle" o "; printer_model = P1S-0.4"
+        /;\s*printer_model\s*[=:]\s*(.+)/i,
+        // Bambu Studio alternativo: "; printer_settings_id = Bambu Lab P1S"
+        /;\s*printer_settings_id\s*[=:]\s*(.+)/i,
+        // Cura: "; Machine name: Creality Ender 3"
+        /;\s*machine[\s_]?name\s*[=:]\s*(.+)/i,
+        // PrusaSlicer: "; printer_type = MK4"
+        /;\s*printer_type\s*[=:]\s*(.+)/i,
+        // Genérico: "; printer = X"
+        /;\s*printer\s*[=:]\s*(.+)/i,
+      ]
+      
+      for (const pattern of printerPatterns) {
+        if (detectedPrinter) break
+        for (const line of commentLines) {
+          const match = line.match(pattern)
           if (match) {
-            const printer = match[1].trim()
-            if (printer.length > 2 && printer.length < 50) {
-              setPrinterName(printer)
-              console.log('🖨️ Impresora detectada:', printer)
+            const rawPrinter = match[1].trim()
+              .replace(/;.*$/, '') // Quitar comentarios al final
+              .replace(/\s+nozzle.*$/i, '') // Quitar info de nozzle
+              .replace(/\s+\d+\.?\d*\s*mm.*$/i, '') // Quitar tamaño de nozzle
+              .trim()
+            
+            if (rawPrinter.length > 1 && rawPrinter.length < 60) {
+              detectedPrinter = rawPrinter
+              console.log('🖨️ Impresora detectada:', detectedPrinter)
+              
+              // Buscar consumo en base de datos
+              const powerInfo = findPrinterPower(detectedPrinter)
+              if (powerInfo) {
+                detectedPowerWatts = powerInfo.watts
+                detectedPrinter = powerInfo.fullName // Usar nombre completo
+                console.log('⚡ Consumo encontrado:', detectedPowerWatts, 'W para', powerInfo.fullName)
+              }
               break
             }
           }
         }
       }
       
-      // BUSCAR PESO - más específico para evitar falsos positivos
-      const weightKeywords = ['filament used', 'filament weight', 'total filament used', 'material weight', 'weight', 'total weight']
+      // Si no encontramos impresora, buscar patrones en nombres de archivo o metadata
+      if (!detectedPrinter) {
+        const textLower = text.toLowerCase()
+        const brandPatterns: [RegExp, string, string][] = [
+          [/bambu|bbl|p1s|p1p|x1c|x1e|a1(?:\s|mini)/i, 'Bambu Lab', 'p1s'],
+          [/ender|creality|k1|cr-10/i, 'Creality', 'ender 3'],
+          [/prusa|mk[34]s?|mini/i, 'Prusa', 'prusa mk4'],
+          [/anycubic|kobra|vyper/i, 'Anycubic', 'kobra 2'],
+          [/elegoo|neptune/i, 'Elegoo', 'neptune 4'],
+          [/voron/i, 'Voron', 'voron 2.4'],
+        ]
+        
+        for (const [pattern, brand, defaultModel] of brandPatterns) {
+          if (pattern.test(textLower) || pattern.test(file.name)) {
+            const powerInfo = PRINTER_POWER_DATABASE[defaultModel]
+            if (powerInfo) {
+              detectedPrinter = `${brand} (detectado)`
+              detectedPowerWatts = powerInfo.watts
+              console.log('🖨️ Marca detectada:', brand, '- usando consumo por defecto:', detectedPowerWatts, 'W')
+            }
+            break
+          }
+        }
+      }
       
-      for (const keyword of weightKeywords) {
+      // Actualizar state de impresora
+      if (detectedPrinter) {
+        setPrinterName(detectedPrinter)
+      }
+      
+      // ========================================
+      // BUSCAR PESO - Orden de prioridad mejorado
+      // ========================================
+      
+      // DEBUG: Buscar líneas con "filament" para ver qué hay
+      const filamentLines = commentLines.filter(l => l.toLowerCase().includes('filament'))
+      console.log('🔍 Líneas con "filament":', filamentLines.slice(0, 15))
+      
+      // DEBUG: Mostrar TODAS las líneas de comentarios para análisis
+      console.log('📋 Total de líneas de comentarios:', commentLines.length)
+      console.log('📋 Primeras 30 líneas:', commentLines.slice(0, 30))
+      
+      // BAMBU STUDIO ESPECÍFICO: Buscar "total filament length [mm]" con valores separados por coma
+      // Este es el formato más común en archivos de Bambu Studio
+      for (const line of commentLines) {
         if (extractedData.pesoGramos) break
         
+        // Buscar la línea específica de Bambu Studio - varios formatos posibles
+        // Formato 1: "; total filament length [mm] : 1772.28,45168.67"
+        // Formato 2: ";total filament length [mm] = 46940"
+        const bambuMatch = line.match(/total\s+filament\s+length\s*\[mm\]\s*[=:]\s*([\d.,\s]+)/i)
+        if (bambuMatch) {
+          console.log('🎯 Línea Bambu Studio encontrada:', line)
+          const valuesStr = bambuMatch[1]
+          const values = valuesStr.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v) && v > 0)
+          console.log('🎯 Valores de longitud parseados:', values)
+          
+          if (values.length > 0) {
+            const totalLengthMm = values.reduce((sum, v) => sum + v, 0)
+            console.log('🎯 Longitud total:', totalLengthMm, 'mm =', totalLengthMm / 1000, 'm')
+            
+            // Calcular peso
+            const filamentDiameter = 1.75
+            const radius = filamentDiameter / 2
+            const volumeMm3 = totalLengthMm * Math.PI * Math.pow(radius, 2)
+            const volumeCm3 = volumeMm3 / 1000
+            const densityPLA = 1.24
+            extractedData.pesoGramos = Math.round(volumeCm3 * densityPLA * 100) / 100
+            console.log('✅ Peso CALCULADO desde Bambu Studio:', extractedData.pesoGramos, 'g')
+          }
+        }
+      }
+      
+      // BAMBU STUDIO: También buscar peso directo en gramos
+      if (!extractedData.pesoGramos) {
+        for (const line of commentLines) {
+          // Formato: "; filament used [g] = 108.09,38.42" o "; total filament weight [g] = 148.61"
+          const weightMatch = line.match(/filament\s+(?:used|weight)\s*\[g\]\s*[=:]\s*([\d.,\s]+)/i)
+          if (weightMatch) {
+            console.log('🎯 Línea de peso en gramos encontrada:', line)
+            const valuesStr = weightMatch[1]
+            const values = valuesStr.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v) && v > 0)
+            if (values.length > 0) {
+              extractedData.pesoGramos = Math.round(values.reduce((sum, v) => sum + v, 0) * 100) / 100
+              console.log('✅ Peso DIRECTO desde Bambu Studio [g]:', extractedData.pesoGramos, 'g')
+              break
+            }
+          }
+        }
+      }
+      
+      // 1. PRIMERO: Buscar peso DIRECTO en gramos de Bambu Studio/PrusaSlicer/Cura
+      // Estos son los formatos más confiables
+      if (!extractedData.pesoGramos) {
+        const directWeightPatterns = [
+          // Bambu Studio: "; filament used [g] = 148.61" o "; total filament used [g] = 148.61"
+          // También manejar múltiples valores: "; filament used [g] = 108.09,38.42"
+          /;\s*(?:total\s+)?filament\s+(?:used|weight)\s*\[g\]\s*[=:]\s*([\d.,]+)/i,
+          // PrusaSlicer: "; filament used [g] = 148.61"
+          /filament\s+used\s*\[g\]\s*[=:]\s*([\d.,]+)/i,
+          // Formato general con unidad explícita: "filament_weight = 148.61g"
+          /filament[_\s]*weight\s*[=:]\s*(\d+\.?\d*)\s*g/i,
+          // Cura: ";Filament weight = 148.61 g"
+          /filament\s+weight\s*[=:]\s*(\d+\.?\d*)\s*g/i,
+          // SuperSlicer/Slic3r: "; total filament cost = X.XX" seguido de peso
+          /;\s*filament\s+used\s*=\s*(\d+\.?\d*)g/i,
+          // Formato: "total weight: 148.61 g"
+          /total\s+weight\s*[=:]\s*(\d+\.?\d*)\s*g/i,
+        ]
+        
+        for (const pattern of directWeightPatterns) {
+          if (extractedData.pesoGramos) break
+          for (const line of commentLines) {
+            const match = line.match(pattern)
+            if (match) {
+              // Manejar múltiples valores separados por coma
+              const valueStr = match[1]
+              const values = valueStr.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v) && v > 0)
+              const totalValue = values.reduce((sum, v) => sum + v, 0)
+              
+              if (totalValue >= 0.1 && totalValue <= 10000) {
+                extractedData.pesoGramos = Math.round(totalValue * 100) / 100
+                console.log('✅ Peso DIRECTO encontrado:', extractedData.pesoGramos, 'g (valores:', values.join('+'), ') en:', line.substring(0, 80))
+                break
+              }
+            }
+          }
+        }
+      }
+      
+      // 2. SEGUNDO: Buscar en todo el texto con patrones más generales
+      if (!extractedData.pesoGramos) {
         for (const line of commentLines) {
           const lowerLine = line.toLowerCase()
-          if (lowerLine.includes(keyword)) {
-            // Buscar número seguido de g/gr/gram/gramos con límites de palabra
-            // Evitar casos como "1002g" sin contexto
-            const match = line.match(/[:\s=](\d+\.?\d*)\s*(?:g|gr|gram|gramos)(?:rams?)?(?:\s|,|;|$)/i)
+          // Solo buscar en líneas que mencionen filament/material + peso
+          if ((lowerLine.includes('filament') || lowerLine.includes('material')) && 
+              (lowerLine.includes('weight') || lowerLine.includes('used') || lowerLine.includes('total'))) {
+            // Buscar número seguido de g/gr/gram con contexto
+            const match = line.match(/[=:]\s*(\d+\.?\d*)\s*(?:g|gr)(?:ams?)?(?:\s|,|;|$)/i)
             if (match) {
               const value = parseFloat(match[1])
               if (value >= 0.1 && value <= 5000) {
-                extractedData.pesoGramos = value
-                console.log('✅ Peso encontrado:', value, 'g en línea:', line.substring(0, 100))
+                extractedData.pesoGramos = Math.round(value * 100) / 100
+                console.log('✅ Peso encontrado (patrón general):', extractedData.pesoGramos, 'g')
                 break
               }
             }
@@ -308,47 +687,67 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         }
       }
       
-      // Buscar patrones específicos en todo el texto (útil para .3mf)
+      // 3. TERCERO: Calcular desde LONGITUD de filamento (Bambu Studio y otros)
+      // Solo si no encontramos peso directo
       if (!extractedData.pesoGramos) {
-        // Buscar "total" o "weight" seguido de número y g
-        const patterns = [
-          /total[^\d]*(\d+\.?\d*)\s*g(?:rams?)?/gi,
-          /weight[^\d]*(\d+\.?\d*)\s*g(?:rams?)?/gi,
-          /filament[^\d]*(\d+\.?\d*)\s*g(?:rams?)?/gi
-        ]
+        console.log('🔍 Buscando longitud de filamento...')
         
-        for (const pattern of patterns) {
-          if (extractedData.pesoGramos) break
-          const matches = text.matchAll(pattern)
-          for (const match of matches) {
-            const value = parseFloat(match[1])
-            if (value >= 0.1 && value <= 5000) {
-              extractedData.pesoGramos = value
-              console.log('✅ Peso encontrado con patrón:', value, 'g')
-              break
-            }
-          }
-        }
-      }
-
-      // BAMBU STUDIO: Calcular peso desde longitud de filamento
-      if (!extractedData.pesoGramos) {
+        // Buscar longitud total de filamento - manejar múltiples valores separados por coma
         for (const line of commentLines) {
+          if (extractedData.pesoGramos) break
           const lowerLine = line.toLowerCase()
-          // Bambu Studio exporta: "total filament length [mm] : 83052.75"
-          if (lowerLine.includes('filament length') || lowerLine.includes('filament used [mm]')) {
-            const match = line.match(/[:\s=](\d+\.?\d*)\s*(?:mm)?/i)
-            if (match) {
-              const lengthMm = parseFloat(match[1])
-              if (lengthMm > 100 && lengthMm < 1000000) { // Rango válido
-                // Calcular peso: Volumen = longitud × π × (diámetro/2)²
+          
+          // Debug: mostrar líneas que contienen "length" o "filament"
+          if (lowerLine.includes('length') && lowerLine.includes('filament')) {
+            console.log('📏 Línea de longitud encontrada:', line)
+          }
+          
+          // Buscar líneas con "filament" + "length" (en cualquier orden) y "mm" o "[mm]"
+          if (lowerLine.includes('filament') && lowerLine.includes('length') &&
+              (lowerLine.includes('mm') || lowerLine.includes('[m]'))) {
+            
+            // Extraer todos los números después de = o :
+            const valuesPart = line.split(/[=:]/)[1]
+            if (valuesPart) {
+              console.log('🔢 Parseando valores de longitud:', valuesPart)
+              
+              // Separar por comas y parsear cada número
+              const parts = valuesPart.split(',')
+              let totalLengthMm = 0
+              const parsedValues: number[] = []
+              const isMeters = lowerLine.includes('[m]') && !lowerLine.includes('[mm]')
+              
+              for (const part of parts) {
+                // Extraer el número de cada parte (manejar formatos como "1772.28" o " 45168.67")
+                const numMatch = part.match(/(\d+\.?\d*)/)
+                if (numMatch) {
+                  let value = parseFloat(numMatch[1])
+                  if (isNaN(value)) continue
+                  
+                  // Convertir metros a mm si es necesario
+                  if (isMeters) {
+                    value = value * 1000
+                  }
+                  
+                  // Solo aceptar valores razonables
+                  if (value > 0 && value < 1000000) {
+                    totalLengthMm += value
+                    parsedValues.push(value)
+                  }
+                }
+              }
+              
+              console.log('🔢 Valores parseados:', parsedValues, 'Total:', totalLengthMm, 'mm')
+              
+              if (totalLengthMm > 100) {
+                // Calcular peso: Volumen = longitud × π × (radio)²
                 const filamentDiameter = 1.75 // mm estándar
                 const radius = filamentDiameter / 2
-                const volumeMm3 = lengthMm * Math.PI * Math.pow(radius, 2)
+                const volumeMm3 = totalLengthMm * Math.PI * Math.pow(radius, 2)
                 const volumeCm3 = volumeMm3 / 1000
-                const densityPLA = 1.25 // g/cm³
+                const densityPLA = 1.24 // g/cm³
                 extractedData.pesoGramos = Math.round(volumeCm3 * densityPLA * 100) / 100
-                console.log('✅ Peso calculado desde longitud Bambu:', extractedData.pesoGramos, 'g (longitud:', lengthMm, 'mm)')
+                console.log('✅ Peso CALCULADO desde longitud:', extractedData.pesoGramos, 'g (longitud total:', totalLengthMm, 'mm)')
                 break
               }
             }
@@ -356,17 +755,17 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         }
       }
       
-      // Si encontramos volumen pero no peso
+      // 4. CUARTO: Buscar volumen en cm³
       if (!extractedData.pesoGramos) {
         for (const line of commentLines) {
           const lowerLine = line.toLowerCase()
-          if ((lowerLine.includes('filament') || lowerLine.includes('material')) && 
-              (lowerLine.includes('cm³') || lowerLine.includes('cm3'))) {
-            const match = line.match(/(\d+\.?\d*)\s*cm[³3]/i)
+          if ((lowerLine.includes('filament') || lowerLine.includes('material') || lowerLine.includes('volume')) && 
+              (lowerLine.includes('cm³') || lowerLine.includes('cm3') || lowerLine.includes('cc'))) {
+            const match = line.match(/[=:]\s*(\d+\.?\d*)\s*(?:cm[³3]|cc)/i)
             if (match) {
               const volume = parseFloat(match[1])
               if (volume > 0 && volume <= 5000) {
-                extractedData.pesoGramos = Math.round(volume * 1.25 * 100) / 100
+                extractedData.pesoGramos = Math.round(volume * 1.24 * 100) / 100
                 console.log('✅ Peso calculado desde volumen:', extractedData.pesoGramos, 'g (volumen:', volume, 'cm³)')
                 break
               }
@@ -435,6 +834,8 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         tipo: isGcodeContent ? 'GCODE (texto plano)' : 'XML/Metadata',
         peso: extractedData.pesoGramos || 'No encontrado',
         tiempo: extractedData.horasImpresion || 'No encontrado',
+        impresora: detectedPrinter || 'No detectada',
+        consumoWatts: detectedPowerWatts || 'No encontrado',
         notasEncontradas: notes.length
       })
       
@@ -443,7 +844,9 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         setInputs(prev => ({ 
           ...prev, 
           ...(extractedData.pesoGramos && { pesoGramos: extractedData.pesoGramos }),
-          ...(extractedData.horasImpresion && { horasImpresion: Math.round(extractedData.horasImpresion * 100) / 100 })
+          ...(extractedData.horasImpresion && { horasImpresion: Math.round(extractedData.horasImpresion * 100) / 100 }),
+          // Auto-completar consumo de watts si se detectó impresora y no hay valor previo
+          ...(detectedPowerWatts && prev.consumoWatts === 0 && { consumoWatts: detectedPowerWatts })
         }))
         
         if (notes.length > 0) {
@@ -454,6 +857,8 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         const extractedFields = []
         if (extractedData.pesoGramos) extractedFields.push(`Peso: ${extractedData.pesoGramos}g`)
         if (extractedData.horasImpresion) extractedFields.push(`Tiempo: ${extractedData.horasImpresion.toFixed(2)}h`)
+        if (detectedPrinter) extractedFields.push(`Impresora: ${detectedPrinter}`)
+        if (detectedPowerWatts) extractedFields.push(`Consumo: ${detectedPowerWatts}W`)
         
         // Agregar información sobre múltiples objetos si se detectaron
         let successMsg = `✅ Datos extraídos: ${extractedFields.join(', ')}`
@@ -462,7 +867,20 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         }
         
         setErrors({ success: successMsg })
-        tracker.toolExecuted(config.id, { action: isGcodeContent ? 'import_gcode_success' : 'import_3mf_success', fileName: file.name, objectCount })
+        
+        // Track importación exitosa
+        trackCustom('file_import_success', {
+          fileType: isGcodeContent ? 'gcode' : '3mf',
+          fileName: file.name,
+          objectCount,
+          extractedFields: extractedFields.length,
+          hasWeight: !!extractedData.pesoGramos,
+          hasTime: !!extractedData.horasImpresion,
+          hasPrinter: !!detectedPrinter,
+          hasPowerWatts: !!detectedPowerWatts,
+          printerName: detectedPrinter || undefined,
+          powerWatts: detectedPowerWatts || undefined,
+        })
       } else {
         console.log('❌ No se pudo extraer ningún dato')
         if (isGcodeContent) {
@@ -477,8 +895,15 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       }
       
     } catch (error) {
-      setErrors({ import: 'Error al leer el archivo. Verifica que el archivo no esté corrupto.' })
+      const errorMessage = 'Error al leer el archivo. Verifica que el archivo no esté corrupto.'
+      setErrors({ import: errorMessage })
       console.error('❌ Error parsing file:', error)
+      
+      // Track error de importación
+      trackCustom('file_import_error', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        fileType: fileExtension,
+      })
     } finally {
       setIsImporting(false)
     }
@@ -490,6 +915,21 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    
+    // Validar archivo con seguridad
+    const validation = validateFile(file, {
+      allowedExtensions: ['.gcode', '.3mf'],
+    })
+    
+    if (!validation.valid) {
+      setErrors({ import: validation.errors.join('. ') })
+      trackCustom('file_validation_failed', {
+        errors: validation.errors,
+        fileName: file.name,
+        fileSize: file.size,
+      })
+      return
+    }
     
     const fileName = file.name.toLowerCase()
     
@@ -508,6 +948,21 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
   const handleStlUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    
+    // Validar archivo con seguridad
+    const validation = validateFile(file, {
+      allowedExtensions: ['.stl'],
+    })
+    
+    if (!validation.valid) {
+      setErrors({ import: validation.errors.join('. ') })
+      trackCustom('file_validation_failed', {
+        errors: validation.errors,
+        fileName: file.name,
+        fileSize: file.size,
+      })
+      return
+    }
     
     const fileName = file.name.toLowerCase()
     if (!fileName.endsWith('.stl')) {
@@ -715,10 +1170,15 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       setResult(resultado)
       setErrors({})
       
-      // Track evento
-      tracker.toolExecuted(config.id, {
+      // Track evento de ejecución con metadata detallada
+      trackExecution({
         pesoGramos: validated.pesoGramos,
         costoTotal: costoTotal,
+        conMargen: conMargen,
+        costoMaterial,
+        costoEnergia,
+        costoDepreciacion,
+        margenGanancia: validated.margenGanancia,
       })
       
       // Callback
@@ -732,13 +1192,15 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       })
       
       // Track result viewed
-      tracker.resultViewed(config.id)
+      trackResult({
+        costoFinal: conMargen,
+      })
       
     } catch (error) {
       if (error instanceof Error) {
         setErrors({ general: error.message })
         onError?.(error)
-        tracker.error(config.id, error)
+        trackError(error)
       }
     }
   }
@@ -758,6 +1220,22 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     const file = e.target.files?.[0]
     if (!file) return
     
+    // Validar archivo con seguridad
+    const validation = validateFile(file, {
+      allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp'],
+      maxSize: 2 * 1024 * 1024, // 2 MB máximo para logos
+    })
+    
+    if (!validation.valid) {
+      setErrors({ import: validation.errors.join('. ') })
+      trackCustom('logo_validation_failed', {
+        errors: validation.errors,
+        fileName: file.name,
+        fileSize: file.size,
+      })
+      return
+    }
+    
     if (!file.type.startsWith('image/')) {
       setErrors({ import: 'Por favor selecciona una imagen válida' })
       return
@@ -766,6 +1244,13 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     const reader = new FileReader()
     reader.onload = (event) => {
       setBusinessLogo(event.target?.result as string)
+      trackCustom('logo_uploaded', {
+        fileSize: file.size,
+        fileType: file.type,
+      })
+    }
+    reader.onerror = () => {
+      setErrors({ import: 'Error al cargar la imagen' })
     }
     reader.readAsDataURL(file)
   }
@@ -913,8 +1398,13 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     doc.save(fileName)
     
-    // Track export
-    tracker.resultExported(config.id, 'pdf')
+    // Track export con metadata
+    trackExport('pdf')
+    trackCustom('pdf_exported', {
+      exportType,
+      hasBusinessName: !!businessName,
+      hasLogo: !!businessLogo,
+    })
     
     setShowExportModal(false)
     setErrors({ success: '✅ PDF exportado exitosamente' })
@@ -971,17 +1461,23 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         {cotizacionMode === 'gcode' && (
           <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg p-4 border-2 border-dashed border-emerald-300">
             <div className="flex items-start gap-4">
-              {/* Preview Image */}
-              {previewImage ? (
+              {/* Preview Image o Modelo 3D */}
+              {threeMFGroup ? (
+                <div className="flex-shrink-0 w-40 h-40 rounded-lg border-2 border-emerald-300 bg-white overflow-hidden">
+                  <ThreeMFViewer group={threeMFGroup} rotation={stlRotation} />
+                </div>
+              ) : previewImage ? (
                 <div className="flex-shrink-0">
                   <img 
                     src={previewImage} 
                     alt="Preview 3D" 
-                    className="w-32 h-32 object-contain rounded-lg border-2 border-emerald-300 bg-white"
+                    className="w-40 h-40 object-contain rounded-lg border-2 border-emerald-300 bg-white"
                   />
                 </div>
               ) : (
-                <div className="text-3xl flex-shrink-0">📁</div>
+                <div className="flex-shrink-0 w-32 h-32 bg-emerald-100 rounded-lg flex items-center justify-center">
+                  <span className="text-5xl">📁</span>
+                </div>
               )}
               
               <div className="flex-1">
@@ -991,9 +1487,25 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                 </p>
                 
                 {printerName && (
-                  <div className="mb-3 inline-flex items-center gap-2 bg-blue-100 text-blue-800 text-sm px-3 py-1 rounded-full">
-                    <span>🖨️</span>
-                    <span className="font-semibold">{printerName}</span>
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <div className="inline-flex items-center gap-2 bg-blue-100 text-blue-800 text-sm px-3 py-1.5 rounded-full">
+                      <span>🖨️</span>
+                      <span className="font-semibold">{printerName}</span>
+                    </div>
+                    {inputs.consumoWatts > 0 && (
+                      <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 text-sm px-3 py-1.5 rounded-full">
+                        <span>⚡</span>
+                        <span className="font-medium">{inputs.consumoWatts}W</span>
+                        <span className="text-amber-600 text-xs">(autodetectado)</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Dimensiones del modelo 3MF */}
+                {threeMFGroup && stlDimensions.x > 0 && (
+                  <div className="mb-3 text-xs text-emerald-700 bg-emerald-100/50 px-2 py-1 rounded inline-block">
+                    📐 Dimensiones: {stlDimensions.x} × {stlDimensions.y} × {stlDimensions.z} mm
                   </div>
                 )}
                 

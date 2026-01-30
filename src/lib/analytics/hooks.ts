@@ -1,7 +1,37 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { tracker } from './tracker'
+
+/**
+ * Hook para tracking automático de pageviews
+ * Se debe usar en el layout principal
+ */
+export function usePageTracking() {
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const previousPath = useRef<string>('')
+
+  useEffect(() => {
+    const currentPath = pathname + (searchParams?.toString() ? `?${searchParams.toString()}` : '')
+    
+    // Evitar duplicados en el primer render
+    if (previousPath.current === currentPath) return
+    
+    previousPath.current = currentPath
+
+    // Track page view
+    tracker.track({
+      toolId: pathname,
+      eventType: 'page_view',
+      metadata: {
+        path: currentPath,
+        referrer: document.referrer || 'direct',
+      },
+    })
+  }, [pathname, searchParams])
+}
 
 /**
  * Hook para trackear cuando una herramienta se abre
@@ -13,14 +43,99 @@ export function useTrackToolOpened(toolId: string, metadata?: Record<string, unk
 }
 
 /**
- * Hook para trackear pageviews
+ * Hook para tracking de herramientas
+ * Proporciona funciones helpers para eventos comunes
  */
-export function useTrackPageView(pageName: string) {
+export function useToolTracking(toolId: string) {
+  // Track que se abrió la herramienta
   useEffect(() => {
-    if (typeof window !== 'undefined' && (window as any).va) {
-      (window as any).va('pageview', { page: pageName })
-    }
-  }, [pageName])
+    tracker.toolOpened(toolId)
+  }, [toolId])
+
+  return {
+    // Track ejecución de la herramienta
+    trackExecution: (metadata?: Record<string, unknown>) => {
+      tracker.toolExecuted(toolId, metadata)
+    },
+
+    // Track resultado visto
+    trackResult: (metadata?: Record<string, unknown>) => {
+      tracker.resultViewed(toolId, metadata)
+    },
+
+    // Track exportación
+    trackExport: (format: string) => {
+      tracker.resultExported(toolId, format)
+    },
+
+    // Track guardado
+    trackSave: () => {
+      tracker.resultSaved(toolId)
+    },
+
+    // Track error
+    trackError: (error: Error) => {
+      tracker.error(toolId, error)
+    },
+
+    // Track evento personalizado
+    trackCustom: (eventType: string, metadata?: Record<string, unknown>) => {
+      tracker.track({
+        toolId,
+        eventType,
+        metadata,
+      })
+    },
+  }
+}
+
+/**
+ * Hook para tracking de conversiones y eventos especiales
+ */
+export function useConversionTracking() {
+  return {
+    // Track inicio de suscripción
+    trackSubscriptionStart: () => {
+      tracker.track({
+        toolId: 'subscription',
+        eventType: 'subscription_started',
+      })
+    },
+
+    // Track suscripción completada
+    trackSubscriptionComplete: (contact: string, type: 'email' | 'whatsapp') => {
+      tracker.track({
+        toolId: 'subscription',
+        eventType: 'subscription_completed',
+        metadata: { type, contactLength: contact.length },
+      })
+    },
+
+    // Track error en suscripción
+    trackSubscriptionError: (error: string) => {
+      tracker.track({
+        toolId: 'subscription',
+        eventType: 'subscription_failed',
+        metadata: { error },
+      })
+    },
+
+    // Track clicks en comunidad
+    trackCommunityClick: (platform: 'facebook' | 'whatsapp') => {
+      tracker.track({
+        toolId: 'community',
+        eventType: `${platform}_link_clicked`,
+      })
+    },
+
+    // Track botón flotante de comunidad
+    trackFloatingButtonClick: () => {
+      tracker.track({
+        toolId: 'community',
+        eventType: 'community_button_clicked',
+      })
+    },
+  }
 }
 
 /**
@@ -36,3 +151,45 @@ export function useTrackEvent() {
     error: tracker.error.bind(tracker),
   }
 }
+
+/**
+ * Hook para tracking de formularios
+ */
+export function useFormTracking(formId: string) {
+  const startTimeRef = useRef<number>(0)
+
+  return {
+    // Track inicio del formulario
+    trackStart: () => {
+      startTimeRef.current = Date.now()
+      tracker.track({
+        toolId: formId,
+        eventType: 'form_started',
+      })
+    },
+
+    // Track completado
+    trackComplete: (values?: Record<string, unknown>) => {
+      const duration = startTimeRef.current ? Date.now() - startTimeRef.current : 0
+      tracker.track({
+        toolId: formId,
+        eventType: 'form_completed',
+        metadata: {
+          duration,
+          fieldsCount: values ? Object.keys(values).length : 0,
+        },
+      })
+    },
+
+    // Track abandonado
+    trackAbandon: (lastField?: string) => {
+      const duration = startTimeRef.current ? Date.now() - startTimeRef.current : 0
+      tracker.track({
+        toolId: formId,
+        eventType: 'form_abandoned',
+        metadata: { duration, lastField },
+      })
+    },
+  }
+}
+
