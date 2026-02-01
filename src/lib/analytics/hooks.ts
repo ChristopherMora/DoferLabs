@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { tracker } from './tracker'
+import type { ToolEvent } from '@/tools/types'
 
 /**
  * Hook para tracking automático de pageviews
@@ -79,7 +80,7 @@ export function useToolTracking(toolId: string) {
     },
 
     // Track evento personalizado
-    trackCustom: (eventType: string, metadata?: Record<string, unknown>) => {
+    trackCustom: (eventType: ToolEvent['eventType'], metadata?: Record<string, unknown>) => {
       tracker.track({
         toolId,
         eventType,
@@ -98,7 +99,7 @@ export function useConversionTracking() {
     trackSubscriptionStart: () => {
       tracker.track({
         toolId: 'subscription',
-        eventType: 'subscription_started',
+        eventType: 'opened',
       })
     },
 
@@ -106,7 +107,7 @@ export function useConversionTracking() {
     trackSubscriptionComplete: (contact: string, type: 'email' | 'whatsapp') => {
       tracker.track({
         toolId: 'subscription',
-        eventType: 'subscription_completed',
+        eventType: 'executed',
         metadata: { type, contactLength: contact.length },
       })
     },
@@ -115,7 +116,7 @@ export function useConversionTracking() {
     trackSubscriptionError: (error: string) => {
       tracker.track({
         toolId: 'subscription',
-        eventType: 'subscription_failed',
+        eventType: 'error',
         metadata: { error },
       })
     },
@@ -124,7 +125,8 @@ export function useConversionTracking() {
     trackCommunityClick: (platform: 'facebook' | 'whatsapp') => {
       tracker.track({
         toolId: 'community',
-        eventType: `${platform}_link_clicked`,
+        eventType: 'opened',
+        metadata: { platform },
       })
     },
 
@@ -132,7 +134,7 @@ export function useConversionTracking() {
     trackFloatingButtonClick: () => {
       tracker.track({
         toolId: 'community',
-        eventType: 'community_button_clicked',
+        eventType: 'opened',
       })
     },
   }
@@ -164,7 +166,7 @@ export function useFormTracking(formId: string) {
       startTimeRef.current = Date.now()
       tracker.track({
         toolId: formId,
-        eventType: 'form_started',
+        eventType: 'opened',
       })
     },
 
@@ -173,7 +175,7 @@ export function useFormTracking(formId: string) {
       const duration = startTimeRef.current ? Date.now() - startTimeRef.current : 0
       tracker.track({
         toolId: formId,
-        eventType: 'form_completed',
+        eventType: 'executed',
         metadata: {
           duration,
           fieldsCount: values ? Object.keys(values).length : 0,
@@ -186,7 +188,7 @@ export function useFormTracking(formId: string) {
       const duration = startTimeRef.current ? Date.now() - startTimeRef.current : 0
       tracker.track({
         toolId: formId,
-        eventType: 'form_abandoned',
+        eventType: 'error',
         metadata: { duration, lastField },
       })
     },

@@ -251,7 +251,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     porcentajeMerma: 0,
     horasImpresion: 0,
     consumoWatts: 0,
-    precioKwh: 0,
+    precioKwh: 2.5,
     precioImpresora: 0,
     vidaUtilHoras: 0,
     margenGanancia: 0,
@@ -281,6 +281,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
   const [exportType, setExportType] = useState<'sencilla' | 'personalizada'>('sencilla')
   const [businessName, setBusinessName] = useState<string>('')
   const [businessLogo, setBusinessLogo] = useState<string>('')
+  const [clientName, setClientName] = useState<string>('')
 
   /**
    * Parsea archivos de slicer (.gcode o .3mf) para extraer datos
@@ -295,7 +296,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     // Track inicio de importación
     const fileExtension = file.name.toLowerCase().split('.').pop() || 'unknown'
-    trackCustom('file_import_started', {
+    trackCustom('opened', {
       fileType: fileExtension,
       fileSize: file.size,
     })
@@ -869,7 +870,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         setErrors({ success: successMsg })
         
         // Track importación exitosa
-        trackCustom('file_import_success', {
+        trackCustom('executed', {
           fileType: isGcodeContent ? 'gcode' : '3mf',
           fileName: file.name,
           objectCount,
@@ -900,7 +901,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       console.error('❌ Error parsing file:', error)
       
       // Track error de importación
-      trackCustom('file_import_error', {
+      trackCustom('error', {
         error: error instanceof Error ? error.message : 'Unknown error',
         fileType: fileExtension,
       })
@@ -923,7 +924,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     if (!validation.valid) {
       setErrors({ import: validation.errors.join('. ') })
-      trackCustom('file_validation_failed', {
+      trackCustom('error', {
         errors: validation.errors,
         fileName: file.name,
         fileSize: file.size,
@@ -956,7 +957,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     if (!validation.valid) {
       setErrors({ import: validation.errors.join('. ') })
-      trackCustom('file_validation_failed', {
+      trackCustom('error', {
         errors: validation.errors,
         fileName: file.name,
         fileSize: file.size,
@@ -1026,7 +1027,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       
       setErrors({ success: `✅ STL cargado: ${dimensions.x.toFixed(1)}×${dimensions.y.toFixed(1)}×${dimensions.z.toFixed(1)}mm, Peso estimado: ${estimatedWeight.toFixed(2)}g` })
       
-      tracker.toolExecuted(config.id, { action: 'import_stl_success', fileName: file.name })
+      trackCustom('executed', { action: 'import_stl_success', fileName: file.name })
     } catch (error) {
       console.error('Error loading STL:', error)
       setErrors({ import: 'Error al cargar el archivo STL. Verifica que sea un archivo válido.' })
@@ -1228,7 +1229,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     if (!validation.valid) {
       setErrors({ import: validation.errors.join('. ') })
-      trackCustom('logo_validation_failed', {
+      trackCustom('error', {
         errors: validation.errors,
         fileName: file.name,
         fileSize: file.size,
@@ -1244,7 +1245,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     const reader = new FileReader()
     reader.onload = (event) => {
       setBusinessLogo(event.target?.result as string)
-      trackCustom('logo_uploaded', {
+      trackCustom('executed', {
         fileSize: file.size,
         fileType: file.type,
       })
@@ -1256,7 +1257,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
   }
 
   /**
-   * Generar PDF de cotización
+   * Generar PDF de cotización para cliente
    */
   const exportToPDF = () => {
     if (!result) return
@@ -1269,144 +1270,160 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     })
     
     let yPosition = 20
+    const pageWidth = doc.internal.pageSize.width
     
-    // Si es cotización personalizada y hay logo
+    // Logo y nombre del negocio (si hay)
     if (exportType === 'personalizada' && businessLogo) {
       try {
-        doc.addImage(businessLogo, 'PNG', 15, yPosition, 40, 40)
+        doc.addImage(businessLogo, 'PNG', 15, yPosition, 35, 35)
+        if (businessName) {
+          doc.setFontSize(18)
+          doc.setFont('helvetica', 'bold')
+          doc.setTextColor(41, 98, 255)
+          doc.text(businessName, 55, yPosition + 12)
+        }
         yPosition += 45
       } catch (error) {
         console.error('Error al agregar logo:', error)
-      }
-    }
-    
-    // Título y nombre del negocio
-    if (exportType === 'personalizada' && businessName) {
-      doc.setFontSize(20)
-      doc.setFont('helvetica', 'bold')
-      doc.text(businessName, 15, yPosition)
-      yPosition += 10
-    }
-    
-    doc.setFontSize(16)
-    doc.setFont('helvetica', 'bold')
-    doc.text('Cotización de Impresión 3D', 15, yPosition)
-    yPosition += 7
-    
-    doc.setFontSize(10)
-    doc.setFont('helvetica', 'normal')
-    doc.text(`Fecha: ${fecha}`, 15, yPosition)
-    yPosition += 15
-    
-    // Información de la pieza
-    doc.setFontSize(12)
-    doc.setFont('helvetica', 'bold')
-    doc.text('Detalles de la Pieza:', 15, yPosition)
-    yPosition += 7
-    
-    doc.setFontSize(10)
-    doc.setFont('helvetica', 'normal')
-    const details = [
-      `Peso del objeto: ${result.breakdown.pesoUsado}g`,
-      `Peso con merma (${result.breakdown.porcentajeMerma}%): ${result.breakdown.pesoReal.toFixed(2)}g`,
-      `Tiempo de impresión: ${inputs.horasImpresion}h`,
-    ]
-    
-    if (stlDimensions.x > 0) {
-      details.push(`Dimensiones: ${stlDimensions.x.toFixed(1)} × ${stlDimensions.y.toFixed(1)} × ${stlDimensions.z.toFixed(1)} mm`)
-    }
-    
-    details.forEach(detail => {
-      doc.text(detail, 15, yPosition)
-      yPosition += 5
-    })
-    
-    yPosition += 5
-    
-    // Tabla de costos
-    autoTable(doc, {
-      startY: yPosition,
-      head: [['Concepto', 'Costo']],
-      body: [
-        ['Material', `$${result.costos.material.toFixed(2)} MXN`],
-        ['Energía', `$${result.costos.energia.toFixed(2)} MXN`],
-        ['Depreciación de máquina', `$${result.costos.depreciacion.toFixed(2)} MXN`],
-        ['', ''],
-        ['COSTO TOTAL', `$${result.costos.total.toFixed(2)} MXN`],
-      ],
-      theme: 'grid',
-      headStyles: { fillColor: [59, 130, 246], fontStyle: 'bold' },
-      bodyStyles: { fontSize: 10 },
-      columnStyles: {
-        0: { cellWidth: 120 },
-        1: { halign: 'right', fontStyle: 'bold' }
-      },
-      didParseCell: function(data) {
-        if (data.row.index === 4) {
-          data.cell.styles.fillColor = [239, 246, 255]
-          data.cell.styles.fontSize = 12
-          data.cell.styles.fontStyle = 'bold'
+        if (businessName) {
+          doc.setFontSize(18)
+          doc.setFont('helvetica', 'bold')
+          doc.setTextColor(41, 98, 255)
+          doc.text(businessName, 15, yPosition)
+          yPosition += 12
         }
       }
-    })
-    
-    // @ts-ignore - autoTable agrega la propiedad lastAutoTable
-    yPosition = doc.lastAutoTable.finalY + 10
-    
-    // Si hay margen de ganancia
-    if (inputs.margenGanancia > 0) {
-      doc.setFontSize(12)
+    } else if (exportType === 'personalizada' && businessName) {
+      doc.setFontSize(18)
       doc.setFont('helvetica', 'bold')
-      doc.setTextColor(59, 130, 246)
-      doc.text(`PRECIO CON MARGEN (${inputs.margenGanancia}%):`, 15, yPosition)
-      
-      doc.setFontSize(16)
-      doc.setTextColor(0, 0, 0)
-      doc.text(`$${result.conMargen.toFixed(2)} MXN`, 15, yPosition + 8)
-      yPosition += 20
+      doc.setTextColor(41, 98, 255)
+      doc.text(businessName, 15, yPosition)
+      yPosition += 12
     }
     
-    // Desglose adicional
-    yPosition += 5
+    // Línea decorativa
+    doc.setDrawColor(41, 98, 255)
+    doc.setLineWidth(0.5)
+    doc.line(15, yPosition, pageWidth - 15, yPosition)
+    yPosition += 10
+    
+    // Título
+    doc.setFontSize(20)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(0, 0, 0)
+    doc.text('Cotización de Impresión 3D', 15, yPosition)
+    yPosition += 10
+    
+    // Fecha y cliente
     doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(80, 80, 80)
+    doc.text(`Fecha: ${fecha}`, 15, yPosition)
+    if (clientName) {
+      doc.text(`Cliente: ${clientName}`, 15, yPosition + 5)
+      yPosition += 5
+    }
+    yPosition += 12
+    
+    // Cuadro con detalles de la pieza
+    doc.setFillColor(245, 247, 250)
+    doc.roundedRect(15, yPosition, pageWidth - 30, 35, 3, 3, 'F')
+    
+    yPosition += 8
+    doc.setFontSize(12)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(0, 0, 0)
+    doc.text('Detalles de la Pieza:', 20, yPosition)
+    yPosition += 7
+    
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(60, 60, 60)
+    
+    const pesoMinutos = `Peso del objeto: ${result.breakdown.pesoUsado}g`
+    const tiempoHoras = inputs.horasImpresion >= 1 
+      ? `${Math.floor(inputs.horasImpresion)}h ${Math.round((inputs.horasImpresion % 1) * 60)}min`
+      : `${Math.round(inputs.horasImpresion * 60)}min`
+    const tiempoTexto = `Tiempo de impresión: ${tiempoHoras}`
+    
+    doc.text(pesoMinutos, 20, yPosition)
+    yPosition += 5
+    doc.text(`Peso con merma (${result.breakdown.porcentajeMerma}%): ${result.breakdown.pesoReal.toFixed(2)}g`, 20, yPosition)
+    yPosition += 5
+    doc.text(tiempoTexto, 20, yPosition)
+    
+    if (stlDimensions.x > 0) {
+      yPosition += 5
+      doc.text(`Dimensiones: ${stlDimensions.x.toFixed(1)} × ${stlDimensions.y.toFixed(1)} × ${stlDimensions.z.toFixed(1)} mm`, 20, yPosition)
+    }
+    
+    yPosition += 15
+    
+    // Precio final destacado
+    const precioFinal = inputs.margenGanancia > 0 ? result.conMargen : result.costos.total
+    
+    // Cuadro del precio
+    doc.setFillColor(41, 98, 255)
+    doc.roundedRect(15, yPosition, pageWidth - 30, 35, 3, 3, 'F')
+    
+    yPosition += 12
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(255, 255, 255)
+    doc.text('PRECIO TOTAL', pageWidth / 2, yPosition, { align: 'center' })
+    
+    yPosition += 12
+    doc.setFontSize(28)
+    doc.setFont('helvetica', 'bold')
+    doc.text(`$${precioFinal.toFixed(2)} MXN`, pageWidth / 2, yPosition, { align: 'center' })
+    
+    yPosition += 20
+    
+    // Notas adicionales (opcional)
+    doc.setFontSize(9)
     doc.setFont('helvetica', 'italic')
     doc.setTextColor(100, 100, 100)
-    doc.text('Desglose:', 15, yPosition)
-    yPosition += 5
+    doc.text('* Precio válido por 30 días', 15, yPosition)
+    yPosition += 4
+    doc.text('* El tiempo de entrega puede variar según disponibilidad', 15, yPosition)
+    yPosition += 4
+    doc.text('* Cualquier modificación al diseño puede alterar el precio', 15, yPosition)
     
-    const breakdown = [
-      `Costo por gramo: $${result.breakdown.costoGramo.toFixed(2)} MXN`,
-      `Energía consumida: ${result.breakdown.energiaKwh.toFixed(2)} kWh`,
-    ]
-    
-    doc.setFontSize(8)
-    breakdown.forEach(item => {
-      doc.text(item, 15, yPosition)
-      yPosition += 4
-    })
-    
-    // Pie de página
+    // Pie de página con línea
     const pageHeight = doc.internal.pageSize.height
+    doc.setDrawColor(200, 200, 200)
+    doc.setLineWidth(0.3)
+    doc.line(15, pageHeight - 20, pageWidth - 15, pageHeight - 20)
+    
     doc.setFontSize(8)
     doc.setTextColor(150, 150, 150)
-    doc.text('Cotización generada con DoferLabs', 15, pageHeight - 10)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Cotización generada con DoferLabs', 15, pageHeight - 12)
+    
+    if (exportType === 'personalizada' && businessName) {
+      doc.text(businessName, pageWidth - 15, pageHeight - 12, { align: 'right' })
+    }
     
     // Guardar PDF
-    const fileName = exportType === 'personalizada' && businessName
+    const fileName = clientName
+      ? `Cotizacion_${clientName.replace(/\s+/g, '_')}_${Date.now()}.pdf`
+      : exportType === 'personalizada' && businessName
       ? `Cotizacion_${businessName.replace(/\s+/g, '_')}_${Date.now()}.pdf`
       : `Cotizacion_Impresion3D_${Date.now()}.pdf`
     
     doc.save(fileName)
     
-    // Track export con metadata
+    // Track export
     trackExport('pdf')
-    trackCustom('pdf_exported', {
+    trackCustom('exported', {
       exportType,
       hasBusinessName: !!businessName,
+      hasClientName: !!clientName,
       hasLogo: !!businessLogo,
     })
     
     setShowExportModal(false)
+    setClientName('') // Limpiar para próxima vez
     setErrors({ success: '✅ PDF exportado exitosamente' })
   }
 
@@ -1717,10 +1734,9 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
             <InfoTooltip text="Peso neto del objeto impreso sin soportes. Lo puedes obtener del slicer o pesando la pieza." />
           </label>
           <input
-            key={`peso-${inputs.pesoGramos}`}
             type="number"
-            value={inputs.pesoGramos}
-            onChange={(e) => handleInputChange('pesoGramos', parseFloat(e.target.value) || 0)}
+            value={inputs.pesoGramos === 0 ? '' : inputs.pesoGramos}
+            onChange={(e) => handleInputChange('pesoGramos', e.target.value === '' ? 0 : parseFloat(e.target.value))}
             placeholder="Ej: 250"
             className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
             min="0.1"
@@ -1736,8 +1752,8 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
             </label>
             <input
               type="number"
-              value={inputs.precioKgFilamento}
-              onChange={(e) => handleInputChange('precioKgFilamento', parseFloat(e.target.value) || 0)}
+              value={inputs.precioKgFilamento === 0 ? '' : inputs.precioKgFilamento}
+              onChange={(e) => handleInputChange('precioKgFilamento', e.target.value === '' ? 0 : parseFloat(e.target.value))}
               placeholder="Ej: 520"
               className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
               min="1"
@@ -1752,15 +1768,19 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
             </label>
             <input
               type="number"
-              value={(inputs.precioKgFilamento / 1000).toFixed(2)}
+              value={inputs.precioKgFilamento === 0 ? '' : (inputs.precioKgFilamento / 1000)}
               onChange={(e) => {
+                if (e.target.value === '') {
+                  handleInputChange('precioKgFilamento', 0)
+                  return
+                }
                 const precioGramo = parseFloat(e.target.value) || 0
                 handleInputChange('precioKgFilamento', precioGramo * 1000)
               }}
               placeholder="Ej: 0.52"
               className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
               min="0.01"
-              step="0.1"
+              step="0.01"
             />
           </div>
         </div>
@@ -1772,8 +1792,8 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           </label>
           <input
             type="number"
-            value={inputs.porcentajeMerma}
-            onChange={(e) => handleInputChange('porcentajeMerma', parseFloat(e.target.value) || 0)}
+            value={inputs.porcentajeMerma === 0 ? '' : inputs.porcentajeMerma}
+            onChange={(e) => handleInputChange('porcentajeMerma', e.target.value === '' ? 0 : parseFloat(e.target.value))}
             placeholder="Ej: 10"
             className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
             min="0"
@@ -1786,18 +1806,20 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         {/* Tiempo */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-700">
-            Tiempo de impresión (horas)
-            <InfoTooltip text="Duración total de la impresión en horas. Lo obtienes del slicer antes de imprimir. Ejemplo: 9.5 horas = 9h 30min" />
+            Tiempo de impresión (minutos)
+            <InfoTooltip text="Duración total de la impresión en minutos. Lo obtienes del slicer antes de imprimir. Ejemplo: 570 minutos = 9h 30min" />
           </label>
           <input
-            key={`tiempo-${inputs.horasImpresion}`}
             type="number"
-            value={inputs.horasImpresion}
-            onChange={(e) => handleInputChange('horasImpresion', parseFloat(e.target.value) || 0)}
-            placeholder="Ej: 9.5"
+            value={inputs.horasImpresion === 0 ? '' : Math.round(inputs.horasImpresion * 60)}
+            onChange={(e) => {
+              const minutos = e.target.value === '' ? 0 : parseFloat(e.target.value)
+              handleInputChange('horasImpresion', minutos / 60)
+            }}
+            placeholder="Ej: 570"
             className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
-            min="0.01"
-            step="0.1"
+            min="1"
+            step="1"
           />
         </div>
 
@@ -1811,14 +1833,14 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                 Consumo impresora (Watts)
                 <InfoTooltip text="Consumo eléctrico promedio de tu impresora durante la impresión. Ender 3: ~200W, Bambu Lab A1: ~350W, Prusa i3: ~120W" />
               </label>
-              <input
-                type="number"
-                value={inputs.consumoWatts}
-                onChange={(e) => handleInputChange('consumoWatts', parseFloat(e.target.value) || 0)}
-                placeholder="Ej: 350"
-                className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
-                min="1"
-              />
+                  <input
+                    type="number"
+                    value={inputs.consumoWatts === 0 ? '' : inputs.consumoWatts}
+                    onChange={(e) => handleInputChange('consumoWatts', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                    placeholder="Ej: 350"
+                    className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
+                    min="1"
+                  />
             </div>
 
             <div className="space-y-2">
@@ -1828,66 +1850,63 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
               </label>
               <input
                 type="number"
-                value={inputs.precioKwh}
-                onChange={(e) => handleInputChange('precioKwh', parseFloat(e.target.value) || 0)}
+                value={inputs.precioKwh === 0 ? '' : inputs.precioKwh}
+                onChange={(e) => handleInputChange('precioKwh', e.target.value === '' ? 0 : parseFloat(e.target.value))}
                 placeholder="Ej: 2.5"
                 className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
                 min="0"
                 step="0.1"
               />
+              {/* Presets de tarifa (México/CFE) */}
+              <div className="mt-2">
+                <select
+                  onChange={(e) => handleInputChange('precioKwh', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                  value={inputs.precioKwh === 0 ? '' : String(inputs.precioKwh)}
+                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded text-sm bg-white"
+                >
+                  <option value="">Seleccionar tarifa CFE (sugerida)</option>
+                  <option value="2.5">CFE - Tarifa doméstica estimada ~2.5 MXN/kWh</option>
+                  <option value="4.5">CFE - Tarifa promedio (comercial ligera) ~4.5 MXN/kWh</option>
+                  <option value="6.5">CFE - Tarifa DAC / alta demanda ~6.5 MXN/kWh</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">
-                Precio impresora (MXN)
-                <InfoTooltip text="Costo de compra de tu impresora 3D. Se usa para calcular depreciación. Ejemplo: Ender 3 ~$5,000, Bambu Lab A1 ~$11,000" />
-              </label>
-              <input
-                type="number"
-                value={inputs.precioImpresora}
-                onChange={(e) => handleInputChange('precioImpresora', parseFloat(e.target.value) || 0)}
-                placeholder="Ej: 10999"
-                className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
-                min="0"
-                step="100"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">
-                Vida útil (horas)
-                <InfoTooltip text="Horas estimadas de uso de la impresora antes de necesitar reemplazo o reparación mayor. Típico: 2000-5000 horas" />
-              </label>
-              <input
-                type="number"
-                value={inputs.vidaUtilHoras}
-                onChange={(e) => handleInputChange('vidaUtilHoras', parseFloat(e.target.value) || 0)}
-                placeholder="Ej: 2000"
-                className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
-                min="100"
-                step="100"
-              />
-            </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Precio impresora (MXN) - Opcional
+              <InfoTooltip text="Costo de compra de tu impresora 3D. Se usa para calcular depreciación del equipo. Déjalo en blanco si no quieres incluir este costo. Ejemplo: Ender 3 ~$5,000, Bambu Lab A1 ~$11,000" />
+            </label>
+            <input
+              type="number"
+              value={inputs.precioImpresora === 0 ? '' : inputs.precioImpresora}
+              onChange={(e) => handleInputChange('precioImpresora', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+              placeholder="Ej: 10999 (opcional)"
+              className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
+              min="0"
+              step="100"
+            />
+            <p className="text-xs text-gray-500">💡 Si incluyes el precio, la depreciación se calculará automáticamente (~2000 horas de vida útil)</p>
           </div>
         </div>
 
         {/* Margen (opcional) */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-700">
-            Margen de ganancia (%) - Opcional
-            <InfoTooltip text="Porcentaje de ganancia sobre el costo total. Recomendado 25-40% para piezas estándar. Ajusta según complejidad y tiempo de diseño." />
+            Tu ganancia (%) - Opcional
+            <InfoTooltip text="¿Cuánto quieres ganar? Este porcentaje se suma al costo total para obtener tu precio de venta. Ejemplo: si tus costos son $100 y pones 30%, cobrarás $130 (ganando $30)." />
           </label>
           <input
             type="number"
-            value={inputs.margenGanancia}
-            onChange={(e) => handleInputChange('margenGanancia', parseFloat(e.target.value) || 0)}
+            value={inputs.margenGanancia === 0 ? '' : inputs.margenGanancia}
+            onChange={(e) => handleInputChange('margenGanancia', e.target.value === '' ? 0 : parseFloat(e.target.value))}
             placeholder="Ej: 30"
             className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
             min="0"
             step="5"
           />
+          <p className="text-xs text-gray-500">💡 Recomendado: 25-40% para piezas estándar, 50-100% para diseños personalizados</p>
         </div>
 
         {/* Botón calcular */}
@@ -1918,9 +1937,11 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
               ${result.costos.total.toFixed(2)} MXN
             </p>
             {inputs.margenGanancia > 0 && (
-              <p className="text-gray-600 mt-2">
-                Con margen: <span className="font-bold text-blue-700">${result.conMargen.toFixed(2)} MXN</span>
-              </p>
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <p className="text-sm text-gray-600 mb-1">Precio de venta (con {inputs.margenGanancia}% de ganancia):</p>
+                <p className="text-3xl font-bold text-green-600">${result.conMargen.toFixed(2)} MXN</p>
+                <p className="text-xs text-gray-500 mt-1">Tu ganancia: ${(result.conMargen - result.costos.total).toFixed(2)} MXN</p>
+              </div>
             )}
           </div>
 
@@ -2008,6 +2029,20 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                   ⭐ Personalizada
                 </button>
               </div>
+            </div>
+            
+            {/* Campo nombre del cliente (siempre visible) */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Nombre del cliente (opcional)
+              </label>
+              <input
+                type="text"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="Ej: Juan Pérez"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+              />
             </div>
             
             {/* Opciones de personalización */}

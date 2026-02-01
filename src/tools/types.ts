@@ -112,7 +112,7 @@ export interface ToolInput<T extends z.ZodTypeAny = z.ZodTypeAny> {
  */
 export interface ToolEvent {
   toolId: string
-  eventType: 'opened' | 'executed' | 'result_viewed' | 'exported' | 'saved' | 'error'
+  eventType: 'opened' | 'executed' | 'result_viewed' | 'exported' | 'saved' | 'error' | 'page_view'
   metadata?: Record<string, unknown>
   timestamp: Date
 }

@@ -18,7 +18,7 @@ export const calculatorInputSchema = z.object({
   
   // Máquina
   precioImpresora: z.number().min(0).max(1000000).optional().default(0), // MXN
-  vidaUtilHoras: z.number().min(100).max(100000).optional().default(2000), // Horas de vida útil
+  vidaUtilHoras: z.number().min(0).max(100000).optional().default(2000), // Horas de vida útil
   
   // Opcionales
   margenGanancia: z.number().min(0).max(1000).optional().default(0),
