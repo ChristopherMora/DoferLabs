@@ -41,7 +41,6 @@ services:
       - "3250"
     networks:
       - makerhub-network
-    command: sh -c "npx prisma migrate deploy && node server.js"
 
 networks:
   makerhub-network:
