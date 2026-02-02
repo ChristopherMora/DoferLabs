@@ -37,27 +37,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-makerhub}?schema=public
       NEXT_PUBLIC_APP_URL: https://makerhub.dofer.com.mx
       # Agregar más variables de entorno según sea necesario
-    ports:
-      - "3250:3250"
+    expose:
+      - "3250"
     networks:
       - makerhub-network
     command: sh -c "npx prisma migrate deploy && node server.js"
-
-  # Nginx como reverse proxy (opcional, recomendado para producción)
-  nginx:
-    image: nginx:alpine
-    container_name: makerhub-nginx
-    restart: unless-stopped
-    depends_on:
-      - app
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    networks:
-      - makerhub-network
 
 networks:
   makerhub-network:
