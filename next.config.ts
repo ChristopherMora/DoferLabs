@@ -6,11 +6,15 @@ const nextConfig: NextConfig = {
   
   // Optimizaciones
   reactStrictMode: true,
-  swcMinify: true,
   
   // Imágenes
   images: {
-    domains: ['makerhub.dofer.com.mx'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'makerhub.dofer.com.mx',
+      },
+    ],
     formats: ['image/avif', 'image/webp'],
   },
   
