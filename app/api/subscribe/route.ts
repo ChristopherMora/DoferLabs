@@ -4,6 +4,10 @@ import { z } from 'zod'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/security/rate-limit'
 import { checkCsrfProtection } from '@/lib/security/csrf'
 
+// Forzar ruta dinámica (no pre-renderizar durante build)
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
 // Validación del input
 const subscribeSchema = z.object({
   contact: z.string().min(3, 'Contacto muy corto').max(100, 'Contacto muy largo'),

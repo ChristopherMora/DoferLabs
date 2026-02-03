@@ -22,6 +22,10 @@ RUN npx prisma generate
 # Deshabilitar telemetría durante build
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# DATABASE_URL dummy para build (Next.js requiere que exista)
+ARG DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+ENV DATABASE_URL=$DATABASE_URL
+
 # Build de Next.js
 RUN npm run build
 

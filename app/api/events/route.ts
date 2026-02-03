@@ -4,6 +4,10 @@ import { z } from 'zod'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/security/rate-limit'
 import { checkCsrfProtection } from '@/lib/security/csrf'
 
+// Forzar ruta dinámica (no pre-renderizar durante build)
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
 // Validación del evento
 const eventSchema = z.object({
   eventType: z.string().min(1).max(100),
