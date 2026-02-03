@@ -1198,7 +1198,46 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       })
       
     } catch (error) {
-      if (error instanceof Error) {
+      // Manejo de errores de validación de Zod
+      if (error && typeof error === 'object' && 'issues' in error) {
+        const zodError = error as { issues: Array<{ path: string[]; message: string }> }
+        const fieldErrors: Record<string, string> = {}
+        
+        // Mapear errores de Zod a mensajes amigables
+        zodError.issues.forEach((issue) => {
+          const field = issue.path[0] as string
+          
+          // Mensajes personalizados por campo
+          switch (field) {
+            case 'pesoGramos':
+              fieldErrors[field] = '⚠️ Te falta llenar el peso en gramos (mínimo 0.1g)'
+              break
+            case 'precioKgFilamento':
+              fieldErrors[field] = '⚠️ Te falta llenar el precio del filamento por kilo'
+              break
+            case 'horasImpresion':
+              fieldErrors[field] = '⚠️ Te falta llenar las horas de impresión (mínimo 0.01h)'
+              break
+            case 'consumoWatts':
+              fieldErrors[field] = '⚠️ Te falta llenar el consumo en watts de tu impresora'
+              break
+            case 'precioKwh':
+              fieldErrors[field] = '⚠️ Te falta llenar el precio del kWh'
+              break
+            case 'porcentajeMerma':
+              fieldErrors[field] = '⚠️ El porcentaje de merma debe estar entre 0 y 100%'
+              break
+            case 'margenGanancia':
+              fieldErrors[field] = '⚠️ El margen de ganancia debe ser un valor válido'
+              break
+            default:
+              fieldErrors[field] = `⚠️ ${issue.message}`
+          }
+        })
+        
+        setErrors(fieldErrors)
+        trackError(new Error('Validation error: ' + Object.values(fieldErrors).join(', ')))
+      } else if (error instanceof Error) {
         setErrors({ general: error.message })
         onError?.(error)
         trackError(error)
@@ -1917,7 +1956,20 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           Calcular Costos
         </button>
 
-        {/* Errores */}
+        {/* Errores de validación */}
+        {Object.keys(errors).length > 0 && !errors.general && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-2">
+            <p className="font-semibold text-red-800 mb-2">❌ Revisa los siguientes campos:</p>
+            {Object.entries(errors).map(([field, message]) => (
+              <div key={field} className="text-red-700 text-sm flex items-start gap-2">
+                <span className="mt-0.5">•</span>
+                <span>{message}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Error general */}
         {errors.general && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
             {errors.general}
