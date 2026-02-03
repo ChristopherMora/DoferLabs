@@ -1860,6 +1860,18 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
             min="1"
             step="1"
           />
+          {inputs.horasImpresion > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <div className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-md font-medium">
+                <span className="text-base">🕐</span>
+                <span>{Math.floor(inputs.horasImpresion)}h {Math.round((inputs.horasImpresion % 1) * 60)}min</span>
+              </div>
+              <span className="text-gray-400">≈</span>
+              <div className="text-gray-600">
+                {(inputs.horasImpresion / 24).toFixed(1)} días
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Energía y Máquina */}
