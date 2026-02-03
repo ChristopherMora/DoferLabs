@@ -38,7 +38,7 @@ export default function Home() {
             {/* Logo/Brand */}
             <div className="space-y-2">
               <h1 className="text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-gray-900 via-blue-600 to-blue-700 bg-clip-text text-transparent">
-                MakerHUB by Dofer
+                Dofer Labs, MakerHub
               </h1>
               <p className="text-lg text-gray-600 max-w-2xl mx-auto">
                 Herramientas gratuitas y prácticas para makers
@@ -212,7 +212,7 @@ export default function Home() {
                 <div className="max-w-xl mx-auto text-center space-y-4">
                   <div className="text-3xl">🚀</div>
                   <h3 className="text-2xl font-bold text-gray-900">
-                    Únete a la Comunidad MakerHUB
+                    Únete a la Comunidad Dofer Labs, MakerHub
                   </h3>
                   <p className="text-sm text-gray-600">
                     Comparte tus proyectos, aprende de otros makers y mantente al día con las últimas herramientas

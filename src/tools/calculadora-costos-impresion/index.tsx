@@ -12,7 +12,7 @@ import autoTable from 'jspdf-autotable'
 import { useToolTracking } from '@/lib/analytics/hooks'
 import { validateFile, ALLOWED_EXTENSIONS } from '@/lib/security/file-validation'
 import type { ToolProps } from '../types'
-import { calculatorInputSchema, type CalculatorInput, type CalculatorResult } from './schema'
+import { calculatorInputSchema, type CalculatorInput, type CalculatorResult, MATERIAL_PRICES } from './schema'
 import { config } from './tool.config'
 
 // Base de datos de consumo de energía por impresora (en Watts promedio para PLA)
@@ -249,11 +249,13 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     pesoGramos: 0,
     precioKgFilamento: 0,
     porcentajeMerma: 0,
+    cantidad: 1,
     horasImpresion: 0,
     consumoWatts: 0,
-    precioKwh: 0,
+    precioKwh: 2.5,
     precioImpresora: 0,
     vidaUtilHoras: 0,
+    costoManoObra: 0,
     margenGanancia: 0,
   })
   
@@ -281,9 +283,13 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
   const [exportType, setExportType] = useState<'sencilla' | 'personalizada'>('sencilla')
   const [businessName, setBusinessName] = useState<string>('')
   const [businessLogo, setBusinessLogo] = useState<string>('')
+  const [clientName, setClientName] = useState<string>('')
+  
+  // State para comparativa de materiales
+  const [showMaterialComparison, setShowMaterialComparison] = useState<boolean>(false)
 
   /**
-   * Parsea archivos de slicer (.gcode o .3mf) para extraer datos
+   * Parsea archivos de slicer (.gcode.3mf) para extraer datos
    */
   const parseSlicerFile = async (file: File) => {
     setIsImporting(true)
@@ -295,7 +301,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     // Track inicio de importación
     const fileExtension = file.name.toLowerCase().split('.').pop() || 'unknown'
-    trackCustom('file_import_started', {
+    trackCustom('opened', {
       fileType: fileExtension,
       fileSize: file.size,
     })
@@ -869,7 +875,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         setErrors({ success: successMsg })
         
         // Track importación exitosa
-        trackCustom('file_import_success', {
+        trackCustom('executed', {
           fileType: isGcodeContent ? 'gcode' : '3mf',
           fileName: file.name,
           objectCount,
@@ -900,7 +906,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       console.error('❌ Error parsing file:', error)
       
       // Track error de importación
-      trackCustom('file_import_error', {
+      trackCustom('error', {
         error: error instanceof Error ? error.message : 'Unknown error',
         fileType: fileExtension,
       })
@@ -918,12 +924,12 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     // Validar archivo con seguridad
     const validation = validateFile(file, {
-      allowedExtensions: ['.gcode', '.3mf'],
+      allowedExtensions: ['.3mf'],
     })
     
     if (!validation.valid) {
       setErrors({ import: validation.errors.join('. ') })
-      trackCustom('file_validation_failed', {
+      trackCustom('error', {
         errors: validation.errors,
         fileName: file.name,
         fileSize: file.size,
@@ -933,9 +939,9 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     const fileName = file.name.toLowerCase()
     
-    // Aceptar .gcode, .3mf, .gcode.3mf
-    if (!fileName.endsWith('.gcode') && !fileName.endsWith('.3mf') && !fileName.includes('.gcode.')) {
-      setErrors({ import: 'Por favor selecciona un archivo .gcode, .3mf o .gcode.3mf' })
+    // Solo aceptar archivos .gcode.3mf
+    if (!fileName.endsWith('.gcode.3mf')) {
+      setErrors({ import: 'Por favor selecciona un archivo .gcode.3mf (exportado desde Bambu Studio, Cura, PrusaSlicer, etc.)' })
       return
     }
     
@@ -956,7 +962,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     if (!validation.valid) {
       setErrors({ import: validation.errors.join('. ') })
-      trackCustom('file_validation_failed', {
+      trackCustom('error', {
         errors: validation.errors,
         fileName: file.name,
         fileSize: file.size,
@@ -1026,7 +1032,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       
       setErrors({ success: `✅ STL cargado: ${dimensions.x.toFixed(1)}×${dimensions.y.toFixed(1)}×${dimensions.z.toFixed(1)}mm, Peso estimado: ${estimatedWeight.toFixed(2)}g` })
       
-      tracker.toolExecuted(config.id, { action: 'import_stl_success', fileName: file.name })
+      trackCustom('executed', { action: 'import_stl_success', fileName: file.name })
     } catch (error) {
       console.error('Error loading STL:', error)
       setErrors({ import: 'Error al cargar el archivo STL. Verifica que sea un archivo válido.' })
@@ -1146,18 +1152,43 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         costoDepreciacion = (validated.precioImpresora / validated.vidaUtilHoras) * validated.horasImpresion
       }
       
-      const costoTotal = costoMaterial + costoEnergia + costoDepreciacion
-      const conMargen = costoTotal + (costoTotal * (validated.margenGanancia / 100))
+      // Costo de mano de obra (post-procesamiento)
+      const costoManoObra = validated.costoManoObra || 0
+      
+      // Costo por pieza individual
+      const costoPorPieza = costoMaterial + costoEnergia + costoDepreciacion + costoManoObra
+      const precioConMargenUnitario = costoPorPieza + (costoPorPieza * (validated.margenGanancia / 100))
+      
+      // Calcular descuento por volumen
+      let descuentoVolumen = 0
+      if (validated.cantidad >= 100) {
+        descuentoVolumen = 15 // 15% descuento para 100+ piezas
+      } else if (validated.cantidad >= 50) {
+        descuentoVolumen = 10 // 10% descuento para 50+ piezas
+      } else if (validated.cantidad >= 20) {
+        descuentoVolumen = 7 // 7% descuento para 20+ piezas
+      } else if (validated.cantidad >= 10) {
+        descuentoVolumen = 5 // 5% descuento para 10+ piezas
+      }
+      
+      // Aplicar descuento
+      const precioFinalUnitario = precioConMargenUnitario * (1 - descuentoVolumen / 100)
+      const precioTotal = precioFinalUnitario * validated.cantidad
       
       const resultado: CalculatorResult = {
         costos: {
           material: costoMaterial,
           energia: costoEnergia,
           depreciacion: costoDepreciacion,
-          tiempo: 0, // Por ahora no valoramos el tiempo
-          total: costoTotal,
+          manoObra: costoManoObra,
+          tiempo: 0,
+          total: costoPorPieza,
         },
-        conMargen,
+        conMargen: precioConMargenUnitario,
+        cantidad: validated.cantidad,
+        precioUnitario: precioFinalUnitario,
+        precioTotal: precioTotal,
+        descuentoVolumen: descuentoVolumen,
         breakdown: {
           pesoUsado: validated.pesoGramos,
           pesoReal,
@@ -1173,12 +1204,15 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       // Track evento de ejecución con metadata detallada
       trackExecution({
         pesoGramos: validated.pesoGramos,
-        costoTotal: costoTotal,
-        conMargen: conMargen,
+        costoTotal: costoPorPieza,
+        conMargen: precioConMargenUnitario,
         costoMaterial,
         costoEnergia,
         costoDepreciacion,
         margenGanancia: validated.margenGanancia,
+        cantidad: validated.cantidad,
+        descuentoVolumen,
+        precioTotal,
       })
       
       // Callback
@@ -1193,11 +1227,53 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       
       // Track result viewed
       trackResult({
-        costoFinal: conMargen,
+        costoFinal: precioTotal,
       })
       
     } catch (error) {
-      if (error instanceof Error) {
+      // Manejo de errores de validación de Zod
+      if (error && typeof error === 'object' && 'issues' in error) {
+        const zodError = error as { issues: Array<{ path: string[]; message: string }> }
+        const fieldErrors: Record<string, string> = {}
+        
+        // Mapear errores de Zod a mensajes amigables
+        zodError.issues.forEach((issue) => {
+          const field = issue.path[0] as string
+          
+          // Mensajes personalizados por campo
+          switch (field) {
+            case 'pesoGramos':
+              fieldErrors[field] = '⚠️ Te falta llenar el peso en gramos (mínimo 0.1g)'
+              break
+            case 'precioKgFilamento':
+              fieldErrors[field] = '⚠️ Te falta llenar el precio del filamento por kilo'
+              break
+            case 'cantidad':
+              fieldErrors[field] = '⚠️ La cantidad debe ser al menos 1 pieza'
+              break
+            case 'horasImpresion':
+              fieldErrors[field] = '⚠️ Te falta llenar las horas de impresión (mínimo 0.01h)'
+              break
+            case 'consumoWatts':
+              fieldErrors[field] = '⚠️ Te falta llenar el consumo en watts de tu impresora'
+              break
+            case 'precioKwh':
+              fieldErrors[field] = '⚠️ Te falta llenar el precio del kWh'
+              break
+            case 'porcentajeMerma':
+              fieldErrors[field] = '⚠️ El porcentaje de merma debe estar entre 0 y 100%'
+              break
+            case 'margenGanancia':
+              fieldErrors[field] = '⚠️ El margen de ganancia debe ser un valor válido'
+              break
+            default:
+              fieldErrors[field] = `⚠️ ${issue.message}`
+          }
+        })
+        
+        setErrors(fieldErrors)
+        trackError(new Error('Validation error: ' + Object.values(fieldErrors).join(', ')))
+      } else if (error instanceof Error) {
         setErrors({ general: error.message })
         onError?.(error)
         trackError(error)
@@ -1228,7 +1304,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     if (!validation.valid) {
       setErrors({ import: validation.errors.join('. ') })
-      trackCustom('logo_validation_failed', {
+      trackCustom('error', {
         errors: validation.errors,
         fileName: file.name,
         fileSize: file.size,
@@ -1244,7 +1320,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     const reader = new FileReader()
     reader.onload = (event) => {
       setBusinessLogo(event.target?.result as string)
-      trackCustom('logo_uploaded', {
+      trackCustom('executed', {
         fileSize: file.size,
         fileType: file.type,
       })
@@ -1256,7 +1332,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
   }
 
   /**
-   * Generar PDF de cotización
+   * Generar PDF de cotización para cliente
    */
   const exportToPDF = () => {
     if (!result) return
@@ -1269,144 +1345,160 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     })
     
     let yPosition = 20
+    const pageWidth = doc.internal.pageSize.width
     
-    // Si es cotización personalizada y hay logo
+    // Logo y nombre del negocio (si hay)
     if (exportType === 'personalizada' && businessLogo) {
       try {
-        doc.addImage(businessLogo, 'PNG', 15, yPosition, 40, 40)
+        doc.addImage(businessLogo, 'PNG', 15, yPosition, 35, 35)
+        if (businessName) {
+          doc.setFontSize(18)
+          doc.setFont('helvetica', 'bold')
+          doc.setTextColor(41, 98, 255)
+          doc.text(businessName, 55, yPosition + 12)
+        }
         yPosition += 45
       } catch (error) {
         console.error('Error al agregar logo:', error)
-      }
-    }
-    
-    // Título y nombre del negocio
-    if (exportType === 'personalizada' && businessName) {
-      doc.setFontSize(20)
-      doc.setFont('helvetica', 'bold')
-      doc.text(businessName, 15, yPosition)
-      yPosition += 10
-    }
-    
-    doc.setFontSize(16)
-    doc.setFont('helvetica', 'bold')
-    doc.text('Cotización de Impresión 3D', 15, yPosition)
-    yPosition += 7
-    
-    doc.setFontSize(10)
-    doc.setFont('helvetica', 'normal')
-    doc.text(`Fecha: ${fecha}`, 15, yPosition)
-    yPosition += 15
-    
-    // Información de la pieza
-    doc.setFontSize(12)
-    doc.setFont('helvetica', 'bold')
-    doc.text('Detalles de la Pieza:', 15, yPosition)
-    yPosition += 7
-    
-    doc.setFontSize(10)
-    doc.setFont('helvetica', 'normal')
-    const details = [
-      `Peso del objeto: ${result.breakdown.pesoUsado}g`,
-      `Peso con merma (${result.breakdown.porcentajeMerma}%): ${result.breakdown.pesoReal.toFixed(2)}g`,
-      `Tiempo de impresión: ${inputs.horasImpresion}h`,
-    ]
-    
-    if (stlDimensions.x > 0) {
-      details.push(`Dimensiones: ${stlDimensions.x.toFixed(1)} × ${stlDimensions.y.toFixed(1)} × ${stlDimensions.z.toFixed(1)} mm`)
-    }
-    
-    details.forEach(detail => {
-      doc.text(detail, 15, yPosition)
-      yPosition += 5
-    })
-    
-    yPosition += 5
-    
-    // Tabla de costos
-    autoTable(doc, {
-      startY: yPosition,
-      head: [['Concepto', 'Costo']],
-      body: [
-        ['Material', `$${result.costos.material.toFixed(2)} MXN`],
-        ['Energía', `$${result.costos.energia.toFixed(2)} MXN`],
-        ['Depreciación de máquina', `$${result.costos.depreciacion.toFixed(2)} MXN`],
-        ['', ''],
-        ['COSTO TOTAL', `$${result.costos.total.toFixed(2)} MXN`],
-      ],
-      theme: 'grid',
-      headStyles: { fillColor: [59, 130, 246], fontStyle: 'bold' },
-      bodyStyles: { fontSize: 10 },
-      columnStyles: {
-        0: { cellWidth: 120 },
-        1: { halign: 'right', fontStyle: 'bold' }
-      },
-      didParseCell: function(data) {
-        if (data.row.index === 4) {
-          data.cell.styles.fillColor = [239, 246, 255]
-          data.cell.styles.fontSize = 12
-          data.cell.styles.fontStyle = 'bold'
+        if (businessName) {
+          doc.setFontSize(18)
+          doc.setFont('helvetica', 'bold')
+          doc.setTextColor(41, 98, 255)
+          doc.text(businessName, 15, yPosition)
+          yPosition += 12
         }
       }
-    })
-    
-    // @ts-ignore - autoTable agrega la propiedad lastAutoTable
-    yPosition = doc.lastAutoTable.finalY + 10
-    
-    // Si hay margen de ganancia
-    if (inputs.margenGanancia > 0) {
-      doc.setFontSize(12)
+    } else if (exportType === 'personalizada' && businessName) {
+      doc.setFontSize(18)
       doc.setFont('helvetica', 'bold')
-      doc.setTextColor(59, 130, 246)
-      doc.text(`PRECIO CON MARGEN (${inputs.margenGanancia}%):`, 15, yPosition)
-      
-      doc.setFontSize(16)
-      doc.setTextColor(0, 0, 0)
-      doc.text(`$${result.conMargen.toFixed(2)} MXN`, 15, yPosition + 8)
-      yPosition += 20
+      doc.setTextColor(41, 98, 255)
+      doc.text(businessName, 15, yPosition)
+      yPosition += 12
     }
     
-    // Desglose adicional
-    yPosition += 5
+    // Línea decorativa
+    doc.setDrawColor(41, 98, 255)
+    doc.setLineWidth(0.5)
+    doc.line(15, yPosition, pageWidth - 15, yPosition)
+    yPosition += 10
+    
+    // Título
+    doc.setFontSize(20)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(0, 0, 0)
+    doc.text('Cotización de Impresión 3D', 15, yPosition)
+    yPosition += 10
+    
+    // Fecha y cliente
     doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(80, 80, 80)
+    doc.text(`Fecha: ${fecha}`, 15, yPosition)
+    if (clientName) {
+      doc.text(`Cliente: ${clientName}`, 15, yPosition + 5)
+      yPosition += 5
+    }
+    yPosition += 12
+    
+    // Cuadro con detalles de la pieza
+    doc.setFillColor(245, 247, 250)
+    doc.roundedRect(15, yPosition, pageWidth - 30, 35, 3, 3, 'F')
+    
+    yPosition += 8
+    doc.setFontSize(12)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(0, 0, 0)
+    doc.text('Detalles de la Pieza:', 20, yPosition)
+    yPosition += 7
+    
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(60, 60, 60)
+    
+    const pesoMinutos = `Peso del objeto: ${result.breakdown.pesoUsado}g`
+    const tiempoHoras = inputs.horasImpresion >= 1 
+      ? `${Math.floor(inputs.horasImpresion)}h ${Math.round((inputs.horasImpresion % 1) * 60)}min`
+      : `${Math.round(inputs.horasImpresion * 60)}min`
+    const tiempoTexto = `Tiempo de impresión: ${tiempoHoras}`
+    
+    doc.text(pesoMinutos, 20, yPosition)
+    yPosition += 5
+    doc.text(`Peso con merma (${result.breakdown.porcentajeMerma}%): ${result.breakdown.pesoReal.toFixed(2)}g`, 20, yPosition)
+    yPosition += 5
+    doc.text(tiempoTexto, 20, yPosition)
+    
+    if (stlDimensions.x > 0) {
+      yPosition += 5
+      doc.text(`Dimensiones: ${stlDimensions.x.toFixed(1)} × ${stlDimensions.y.toFixed(1)} × ${stlDimensions.z.toFixed(1)} mm`, 20, yPosition)
+    }
+    
+    yPosition += 15
+    
+    // Precio final destacado
+    const precioFinal = inputs.margenGanancia > 0 ? result.conMargen : result.costos.total
+    
+    // Cuadro del precio
+    doc.setFillColor(41, 98, 255)
+    doc.roundedRect(15, yPosition, pageWidth - 30, 35, 3, 3, 'F')
+    
+    yPosition += 12
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(255, 255, 255)
+    doc.text('PRECIO TOTAL', pageWidth / 2, yPosition, { align: 'center' })
+    
+    yPosition += 12
+    doc.setFontSize(28)
+    doc.setFont('helvetica', 'bold')
+    doc.text(`$${precioFinal.toFixed(2)} MXN`, pageWidth / 2, yPosition, { align: 'center' })
+    
+    yPosition += 20
+    
+    // Notas adicionales (opcional)
+    doc.setFontSize(9)
     doc.setFont('helvetica', 'italic')
     doc.setTextColor(100, 100, 100)
-    doc.text('Desglose:', 15, yPosition)
-    yPosition += 5
+    doc.text('* Precio válido por 30 días', 15, yPosition)
+    yPosition += 4
+    doc.text('* El tiempo de entrega puede variar según disponibilidad', 15, yPosition)
+    yPosition += 4
+    doc.text('* Cualquier modificación al diseño puede alterar el precio', 15, yPosition)
     
-    const breakdown = [
-      `Costo por gramo: $${result.breakdown.costoGramo.toFixed(2)} MXN`,
-      `Energía consumida: ${result.breakdown.energiaKwh.toFixed(2)} kWh`,
-    ]
-    
-    doc.setFontSize(8)
-    breakdown.forEach(item => {
-      doc.text(item, 15, yPosition)
-      yPosition += 4
-    })
-    
-    // Pie de página
+    // Pie de página con línea
     const pageHeight = doc.internal.pageSize.height
+    doc.setDrawColor(200, 200, 200)
+    doc.setLineWidth(0.3)
+    doc.line(15, pageHeight - 20, pageWidth - 15, pageHeight - 20)
+    
     doc.setFontSize(8)
     doc.setTextColor(150, 150, 150)
-    doc.text('Cotización generada con DoferLabs', 15, pageHeight - 10)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Cotización generada con DoferLabs', 15, pageHeight - 12)
+    
+    if (exportType === 'personalizada' && businessName) {
+      doc.text(businessName, pageWidth - 15, pageHeight - 12, { align: 'right' })
+    }
     
     // Guardar PDF
-    const fileName = exportType === 'personalizada' && businessName
+    const fileName = clientName
+      ? `Cotizacion_${clientName.replace(/\s+/g, '_')}_${Date.now()}.pdf`
+      : exportType === 'personalizada' && businessName
       ? `Cotizacion_${businessName.replace(/\s+/g, '_')}_${Date.now()}.pdf`
       : `Cotizacion_Impresion3D_${Date.now()}.pdf`
     
     doc.save(fileName)
     
-    // Track export con metadata
+    // Track export
     trackExport('pdf')
-    trackCustom('pdf_exported', {
+    trackCustom('exported', {
       exportType,
       hasBusinessName: !!businessName,
+      hasClientName: !!clientName,
       hasLogo: !!businessLogo,
     })
     
     setShowExportModal(false)
+    setClientName('') // Limpiar para próxima vez
     setErrors({ success: '✅ PDF exportado exitosamente' })
   }
 
@@ -1433,7 +1525,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
               : 'border-transparent text-gray-500 hover:text-gray-700'
           }`}
         >
-          📦 GCODE / 3MF
+          📦 Archivo .gcode.3mf
         </button>
         <button
           onClick={() => {
@@ -1483,7 +1575,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
               <div className="flex-1">
                 <h3 className="font-semibold text-emerald-900 mb-1">Importar desde Slicer</h3>
                 <p className="text-sm text-emerald-700 mb-3">
-                  Sube tu archivo <strong>.gcode, .3mf o .gcode.3mf</strong> y autocompletaremos los datos
+                  Sube tu archivo <strong>.gcode.3mf</strong> y autocompletaremos los datos
                 </p>
                 
                 {printerName && (
@@ -1513,7 +1605,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                   <span>{isImporting ? 'Procesando...' : 'Elegir archivo'}</span>
                   <input
                     type="file"
-                    accept=".gcode,.GCODE,.3mf,.3MF,text/plain,text/x-gcode,application/x-3mf"
+                    accept=".3mf,.3MF"
                     onChange={handleFileUpload}
                     disabled={isImporting}
                     className="hidden"
@@ -1717,10 +1809,9 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
             <InfoTooltip text="Peso neto del objeto impreso sin soportes. Lo puedes obtener del slicer o pesando la pieza." />
           </label>
           <input
-            key={`peso-${inputs.pesoGramos}`}
             type="number"
-            value={inputs.pesoGramos}
-            onChange={(e) => handleInputChange('pesoGramos', parseFloat(e.target.value) || 0)}
+            value={inputs.pesoGramos === 0 ? '' : inputs.pesoGramos}
+            onChange={(e) => handleInputChange('pesoGramos', e.target.value === '' ? 0 : parseFloat(e.target.value))}
             placeholder="Ej: 250"
             className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
             min="0.1"
@@ -1736,8 +1827,8 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
             </label>
             <input
               type="number"
-              value={inputs.precioKgFilamento}
-              onChange={(e) => handleInputChange('precioKgFilamento', parseFloat(e.target.value) || 0)}
+              value={inputs.precioKgFilamento === 0 ? '' : inputs.precioKgFilamento}
+              onChange={(e) => handleInputChange('precioKgFilamento', e.target.value === '' ? 0 : parseFloat(e.target.value))}
               placeholder="Ej: 520"
               className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
               min="1"
@@ -1752,15 +1843,19 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
             </label>
             <input
               type="number"
-              value={(inputs.precioKgFilamento / 1000).toFixed(2)}
+              value={inputs.precioKgFilamento === 0 ? '' : (inputs.precioKgFilamento / 1000)}
               onChange={(e) => {
+                if (e.target.value === '') {
+                  handleInputChange('precioKgFilamento', 0)
+                  return
+                }
                 const precioGramo = parseFloat(e.target.value) || 0
                 handleInputChange('precioKgFilamento', precioGramo * 1000)
               }}
               placeholder="Ej: 0.52"
               className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
               min="0.01"
-              step="0.1"
+              step="0.01"
             />
           </div>
         </div>
@@ -1772,8 +1867,8 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           </label>
           <input
             type="number"
-            value={inputs.porcentajeMerma}
-            onChange={(e) => handleInputChange('porcentajeMerma', parseFloat(e.target.value) || 0)}
+            value={inputs.porcentajeMerma === 0 ? '' : inputs.porcentajeMerma}
+            onChange={(e) => handleInputChange('porcentajeMerma', e.target.value === '' ? 0 : parseFloat(e.target.value))}
             placeholder="Ej: 10"
             className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
             min="0"
@@ -1783,22 +1878,72 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           <p className="text-xs text-gray-500">Típico FDM: 10% | MSLA: 30%</p>
         </div>
 
+        {/* Cantidad de piezas */}
+        <div className="space-y-2 bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-lg border-2 border-purple-200">
+          <label className="block text-base font-semibold text-purple-900">
+            📦 ¿Cuántas piezas necesitas?
+            <InfoTooltip text="Cantidad total de piezas idénticas a imprimir. Obtendrás descuentos automáticos por volumen: 10+ piezas (-5%), 20+ piezas (-7%), 50+ piezas (-10%), 100+ piezas (-15%)" />
+          </label>
+          <input
+            type="number"
+            value={inputs.cantidad}
+            onChange={(e) => {
+              const cantidad = e.target.value === '' ? 1 : Math.max(1, parseInt(e.target.value))
+              handleInputChange('cantidad', cantidad)
+            }}
+            placeholder="1"
+            className="w-full px-4 py-3 text-xl font-bold text-purple-900 border-2 border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white transition-all"
+            min="1"
+            step="1"
+          />
+          {inputs.cantidad >= 10 && (
+            <div className="bg-purple-100 border border-purple-300 rounded p-2 text-sm">
+              <span className="font-bold text-purple-700">
+                🎉 {inputs.cantidad >= 100 ? '15%' : inputs.cantidad >= 50 ? '10%' : inputs.cantidad >= 20 ? '7%' : '5%'} de descuento por volumen
+              </span>
+              <p className="text-xs text-purple-600 mt-1">
+                {inputs.cantidad >= 100 && 'Producción masiva: 100+ piezas'}
+                {inputs.cantidad >= 50 && inputs.cantidad < 100 && 'Lote grande: 50-99 piezas'}
+                {inputs.cantidad >= 20 && inputs.cantidad < 50 && 'Lote mediano: 20-49 piezas'}
+                {inputs.cantidad >= 10 && inputs.cantidad < 20 && 'Lote pequeño: 10-19 piezas'}
+              </p>
+            </div>
+          )}
+          <p className="text-xs text-purple-700">
+            💡 <span className="font-semibold">Descuentos:</span> 10+ (-5%) • 20+ (-7%) • 50+ (-10%) • 100+ (-15%)
+          </p>
+        </div>
+
         {/* Tiempo */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-700">
-            Tiempo de impresión (horas)
-            <InfoTooltip text="Duración total de la impresión en horas. Lo obtienes del slicer antes de imprimir. Ejemplo: 9.5 horas = 9h 30min" />
+            Tiempo de impresión (minutos)
+            <InfoTooltip text="Duración total de la impresión en minutos. Lo obtienes del slicer antes de imprimir. Ejemplo: 570 minutos = 9h 30min" />
           </label>
           <input
-            key={`tiempo-${inputs.horasImpresion}`}
             type="number"
-            value={inputs.horasImpresion}
-            onChange={(e) => handleInputChange('horasImpresion', parseFloat(e.target.value) || 0)}
-            placeholder="Ej: 9.5"
+            value={inputs.horasImpresion === 0 ? '' : Math.round(inputs.horasImpresion * 60)}
+            onChange={(e) => {
+              const minutos = e.target.value === '' ? 0 : parseFloat(e.target.value)
+              handleInputChange('horasImpresion', minutos / 60)
+            }}
+            placeholder="Ej: 570"
             className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
-            min="0.01"
-            step="0.1"
+            min="1"
+            step="1"
           />
+          {inputs.horasImpresion > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <div className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-md font-medium">
+                <span className="text-base">🕐</span>
+                <span>{Math.floor(inputs.horasImpresion)}h {Math.round((inputs.horasImpresion % 1) * 60)}min</span>
+              </div>
+              <span className="text-gray-400">≈</span>
+              <div className="text-gray-600">
+                {(inputs.horasImpresion / 24).toFixed(1)} días
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Energía y Máquina */}
@@ -1811,14 +1956,14 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                 Consumo impresora (Watts)
                 <InfoTooltip text="Consumo eléctrico promedio de tu impresora durante la impresión. Ender 3: ~200W, Bambu Lab A1: ~350W, Prusa i3: ~120W" />
               </label>
-              <input
-                type="number"
-                value={inputs.consumoWatts}
-                onChange={(e) => handleInputChange('consumoWatts', parseFloat(e.target.value) || 0)}
-                placeholder="Ej: 350"
-                className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
-                min="1"
-              />
+                  <input
+                    type="number"
+                    value={inputs.consumoWatts === 0 ? '' : inputs.consumoWatts}
+                    onChange={(e) => handleInputChange('consumoWatts', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                    placeholder="Ej: 350"
+                    className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
+                    min="1"
+                  />
             </div>
 
             <div className="space-y-2">
@@ -1828,66 +1973,194 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
               </label>
               <input
                 type="number"
-                value={inputs.precioKwh}
-                onChange={(e) => handleInputChange('precioKwh', parseFloat(e.target.value) || 0)}
+                value={inputs.precioKwh === 0 ? '' : inputs.precioKwh}
+                onChange={(e) => handleInputChange('precioKwh', e.target.value === '' ? 0 : parseFloat(e.target.value))}
                 placeholder="Ej: 2.5"
                 className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
                 min="0"
                 step="0.1"
               />
+              {/* Presets de tarifa (México/CFE) */}
+              <div className="mt-2">
+                <select
+                  onChange={(e) => handleInputChange('precioKwh', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                  value={inputs.precioKwh === 0 ? '' : String(inputs.precioKwh)}
+                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded text-sm bg-white"
+                >
+                  <option value="">Seleccionar tarifa CFE (sugerida)</option>
+                  <option value="2.5">CFE - Tarifa doméstica estimada ~2.5 MXN/kWh</option>
+                  <option value="4.5">CFE - Tarifa promedio (comercial ligera) ~4.5 MXN/kWh</option>
+                  <option value="6.5">CFE - Tarifa DAC / alta demanda ~6.5 MXN/kWh</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">
-                Precio impresora (MXN)
-                <InfoTooltip text="Costo de compra de tu impresora 3D. Se usa para calcular depreciación. Ejemplo: Ender 3 ~$5,000, Bambu Lab A1 ~$11,000" />
-              </label>
-              <input
-                type="number"
-                value={inputs.precioImpresora}
-                onChange={(e) => handleInputChange('precioImpresora', parseFloat(e.target.value) || 0)}
-                placeholder="Ej: 10999"
-                className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
-                min="0"
-                step="100"
-              />
-            </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Precio impresora (MXN) - Opcional
+              <InfoTooltip text="Costo de compra de tu impresora 3D. Se usa para calcular depreciación del equipo. Déjalo en blanco si no quieres incluir este costo. Ejemplo: Ender 3 ~$5,000, Bambu Lab A1 ~$11,000" />
+            </label>
+            <input
+              type="number"
+              value={inputs.precioImpresora === 0 ? '' : inputs.precioImpresora}
+              onChange={(e) => handleInputChange('precioImpresora', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+              placeholder="Ej: 10999 (opcional)"
+              className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
+              min="0"
+              step="100"
+            />
+            <p className="text-xs text-gray-500">💡 Si incluyes el precio, la depreciación se calculará automáticamente (~2000 horas de vida útil)</p>
+          </div>
+        </div>
 
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">
-                Vida útil (horas)
-                <InfoTooltip text="Horas estimadas de uso de la impresora antes de necesitar reemplazo o reparación mayor. Típico: 2000-5000 horas" />
-              </label>
-              <input
-                type="number"
-                value={inputs.vidaUtilHoras}
-                onChange={(e) => handleInputChange('vidaUtilHoras', parseFloat(e.target.value) || 0)}
-                placeholder="Ej: 2000"
-                className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
-                min="100"
-                step="100"
-              />
-            </div>
+        {/* Mano de obra */}
+        <div className="space-y-2 border-t pt-4">
+          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">🔧 Mano de Obra (Opcional)</h3>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Costo de post-procesamiento
+              <InfoTooltip text="Si la pieza requiere trabajo manual adicional como limpieza, lijado, pintura, ensamblaje, etc., ingresa aquí el costo que le asignas a ese trabajo. Ejemplo: $50 por limpieza + $100 por pintura = $150 total" />
+            </label>
+            <input
+              type="number"
+              value={inputs.costoManoObra === 0 ? '' : inputs.costoManoObra}
+              onChange={(e) => handleInputChange('costoManoObra', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+              placeholder="Ej: 150 (opcional)"
+              className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
+              min="0"
+              step="10"
+            />
+            {inputs.costoManoObra > 0 && (
+              <div className="flex items-center gap-2 text-sm bg-blue-50 border border-blue-200 rounded p-2">
+                <span>✅</span>
+                <span className="text-blue-700">
+                  Se agregarán <span className="font-bold">${inputs.costoManoObra.toFixed(2)}</span> por trabajo manual
+                </span>
+              </div>
+            )}
+            <p className="text-xs text-gray-500">
+              💡 <span className="font-semibold">Ejemplos:</span> Limpieza ($20-50), Lijado ($30-80), Pintura ($50-200), Ensamblaje ($40-150)
+            </p>
           </div>
         </div>
 
         {/* Margen (opcional) */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">
-            Margen de ganancia (%) - Opcional
-            <InfoTooltip text="Porcentaje de ganancia sobre el costo total. Recomendado 25-40% para piezas estándar. Ajusta según complejidad y tiempo de diseño." />
-          </label>
-          <input
-            type="number"
-            value={inputs.margenGanancia}
-            onChange={(e) => handleInputChange('margenGanancia', parseFloat(e.target.value) || 0)}
-            placeholder="Ej: 30"
-            className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
-            min="0"
-            step="5"
-          />
+        <div className="space-y-3 border-t pt-4 bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg">
+          <div className="flex items-start gap-2">
+            <span className="text-2xl">💰</span>
+            <div className="flex-1">
+              <label className="block text-base font-semibold text-gray-800">
+                ¿Cuánto quieres ganar por este trabajo?
+              </label>
+              <p className="text-sm text-gray-600 mt-1">
+                Ingresa el porcentaje de ganancia que quieres obtener sobre tus costos de producción
+              </p>
+            </div>
+          </div>
+
+          <div className="relative">
+            <input
+              type="number"
+              value={inputs.margenGanancia === 0 ? '' : inputs.margenGanancia}
+              onChange={(e) => handleInputChange('margenGanancia', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+              placeholder="Ejemplo: 50"
+              className="w-full px-4 py-3 text-xl font-bold text-gray-900 border-2 border-green-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all"
+              min="0"
+              step="5"
+            />
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xl font-bold text-gray-400">%</span>
+          </div>
+
+          {/* Preview de la ganancia */}
+          {inputs.margenGanancia > 0 && inputs.pesoGramos > 0 && (
+            <div className="bg-white border-2 border-green-300 rounded-lg p-4 space-y-3">
+              {/* Cálculo rápido */}
+              {(() => {
+                const pesoReal = inputs.pesoGramos * (1 + inputs.porcentajeMerma / 100)
+                const costoMaterial = (pesoReal * inputs.precioKgFilamento) / 1000
+                const energiaKwh = (inputs.consumoWatts * inputs.horasImpresion) / 1000
+                const costoEnergia = energiaKwh * inputs.precioKwh
+                let costoDepreciacion = 0
+                if (inputs.precioImpresora && inputs.vidaUtilHoras) {
+                  costoDepreciacion = (inputs.precioImpresora / inputs.vidaUtilHoras) * inputs.horasImpresion
+                }
+                const costoManoObra = inputs.costoManoObra || 0
+                const costoPorPieza = costoMaterial + costoEnergia + costoDepreciacion + costoManoObra
+                const precioConMargen = costoPorPieza + (costoPorPieza * (inputs.margenGanancia / 100))
+                
+                // Calcular descuento
+                let descuento = 0
+                if (inputs.cantidad >= 100) descuento = 15
+                else if (inputs.cantidad >= 50) descuento = 10
+                else if (inputs.cantidad >= 20) descuento = 7
+                else if (inputs.cantidad >= 10) descuento = 5
+                
+                const precioFinal = precioConMargen * (1 - descuento / 100)
+                const gananciaUnitaria = precioFinal - costoPorPieza
+                const gananciaTotal = gananciaUnitaria * inputs.cantidad
+                const precioTotal = precioFinal * inputs.cantidad
+
+                return (
+                  <>
+                    <div className="text-center pb-3 border-b border-gray-200">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                        {inputs.cantidad > 1 ? `Ganancia total (${inputs.cantidad} piezas)` : 'Te quedarás con'}
+                      </p>
+                      <p className="text-3xl font-bold text-green-600">${gananciaTotal.toFixed(2)}</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {inputs.cantidad > 1 ? `$${gananciaUnitaria.toFixed(2)} por pieza` : 'de ganancia neta'}
+                      </p>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="text-center p-2 bg-gray-50 rounded">
+                        <p className="text-gray-600 text-xs mb-1">Costo {inputs.cantidad > 1 ? 'unitario' : 'total'}</p>
+                        <p className="font-bold text-gray-900">${costoPorPieza.toFixed(2)}</p>
+                      </div>
+                      <div className="text-center p-2 bg-green-100 rounded">
+                        <p className="text-green-700 text-xs mb-1">Precio {inputs.cantidad > 1 ? 'unitario' : 'total'}</p>
+                        <p className="font-bold text-green-700">${precioFinal.toFixed(2)}</p>
+                        {descuento > 0 && (
+                          <p className="text-xs text-purple-600">-{descuento}% desc.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {inputs.cantidad > 1 && (
+                      <div className="bg-purple-50 border border-purple-200 rounded p-3 text-center">
+                        <p className="text-sm font-bold text-purple-900">
+                          Precio total: ${precioTotal.toFixed(2)} MXN
+                        </p>
+                        <p className="text-xs text-purple-600 mt-1">
+                          {inputs.cantidad} × ${precioFinal.toFixed(2)}
+                          {descuento > 0 && ` (con ${descuento}% descuento)`}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="bg-blue-50 border border-blue-200 rounded p-2 text-xs text-center text-blue-800">
+                      📊 {inputs.cantidad > 1 ? `Por ${inputs.cantidad} piezas: ` : ''}
+                      Cobrarás <span className="font-bold">${(inputs.cantidad > 1 ? precioTotal : precioFinal).toFixed(2)}</span>, 
+                      ganancia de <span className="font-bold text-green-600">${gananciaTotal.toFixed(2)}</span> ({inputs.margenGanancia}%)
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+          )}
+
+          <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded p-2">
+            <span className="text-sm">💡</span>
+            <div className="text-xs text-gray-600 flex-1">
+              <span className="font-semibold">Guía de porcentajes:</span>
+              <ul className="mt-1 space-y-0.5 ml-2">
+                <li>• 25-40%: Piezas simples o producción en serie</li>
+                <li>• 50-80%: Piezas estándar con valor agregado</li>
+                <li>• 100-200%: Diseños personalizados o trabajos complejos</li>
+              </ul>
+            </div>
+          </div>
         </div>
 
         {/* Botón calcular */}
@@ -1898,7 +2171,28 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           Calcular Costos
         </button>
 
-        {/* Errores */}
+        {/* Disclaimer */}
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+          <span className="text-amber-600 text-lg flex-shrink-0">⚠️</span>
+          <p className="text-xs text-amber-800">
+            <span className="font-semibold">Nota:</span> Los tiempos de impresión y el peso pueden variar ligeramente dependiendo de la configuración del slicer, temperatura ambiente, y condiciones de la impresora. Estos cálculos son estimaciones.
+          </p>
+        </div>
+
+        {/* Errores de validación */}
+        {Object.keys(errors).length > 0 && !errors.general && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-2">
+            <p className="font-semibold text-red-800 mb-2">❌ Revisa los siguientes campos:</p>
+            {Object.entries(errors).map(([field, message]) => (
+              <div key={field} className="text-red-700 text-sm flex items-start gap-2">
+                <span className="mt-0.5">•</span>
+                <span>{message}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Error general */}
         {errors.general && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
             {errors.general}
@@ -1911,21 +2205,59 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg shadow-lg p-6 space-y-4">
           <h2 className="text-2xl font-bold text-blue-900">Resultado</h2>
           
+          {/* Cantidad y descuento */}
+          {result.cantidad > 1 && (
+            <div className="bg-purple-100 border-2 border-purple-300 rounded-lg p-4 text-center">
+              <p className="text-sm text-purple-700 font-semibold">
+                📦 Cotización para {result.cantidad} piezas idénticas
+              </p>
+              {result.descuentoVolumen > 0 && (
+                <p className="text-xs text-purple-600 mt-1">
+                  ✨ Descuento por volumen aplicado: {result.descuentoVolumen}%
+                </p>
+              )}
+            </div>
+          )}
+          
           {/* Costo total destacado */}
           <div className="bg-white rounded-lg p-6 text-center">
-            <p className="text-gray-600 text-sm uppercase tracking-wide">Costo Total</p>
+            <p className="text-gray-600 text-sm uppercase tracking-wide">
+              {result.cantidad > 1 ? 'Costo por Pieza' : 'Costo Total'}
+            </p>
             <p className="text-5xl font-bold text-blue-600">
               ${result.costos.total.toFixed(2)} MXN
             </p>
             {inputs.margenGanancia > 0 && (
-              <p className="text-gray-600 mt-2">
-                Con margen: <span className="font-bold text-blue-700">${result.conMargen.toFixed(2)} MXN</span>
-              </p>
+              <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">
+                    Precio {result.cantidad > 1 ? 'unitario' : 'de venta'} (con {inputs.margenGanancia}% de ganancia
+                    {result.descuentoVolumen > 0 && ` y ${result.descuentoVolumen}% descuento`}):
+                  </p>
+                  <p className="text-3xl font-bold text-green-600">${result.precioUnitario.toFixed(2)} MXN</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Tu ganancia: ${(result.precioUnitario - result.costos.total).toFixed(2)} MXN por pieza
+                  </p>
+                </div>
+                
+                {result.cantidad > 1 && (
+                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-4 border-2 border-purple-200">
+                    <p className="text-sm text-purple-700 font-semibold mb-1">💰 PRECIO TOTAL DEL PEDIDO</p>
+                    <p className="text-4xl font-bold text-purple-900">${result.precioTotal.toFixed(2)} MXN</p>
+                    <p className="text-xs text-purple-600 mt-2">
+                      {result.cantidad} piezas × ${result.precioUnitario.toFixed(2)} = ${result.precioTotal.toFixed(2)}
+                    </p>
+                    <p className="text-sm font-bold text-green-600 mt-2">
+                      Ganancia total: ${((result.precioUnitario - result.costos.total) * result.cantidad).toFixed(2)} MXN
+                    </p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
           {/* Breakdown */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-white rounded-lg p-4">
               <p className="text-gray-600 text-sm">💰 Material</p>
               <p className="text-2xl font-bold text-gray-900">${result.costos.material.toFixed(2)}</p>
@@ -1949,28 +2281,141 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                 Por uso de máquina
               </p>
             </div>
+
+            {result.costos.manoObra > 0 && (
+              <div className="bg-white rounded-lg p-4 border-2 border-blue-200">
+                <p className="text-gray-600 text-sm">🔧 Mano de Obra</p>
+                <p className="text-2xl font-bold text-blue-600">${result.costos.manoObra.toFixed(2)}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Post-procesamiento
+                </p>
+              </div>
+            )}
           </div>
 
           {/* CTAs */}
-          <div className="flex gap-3 mt-4">
-            <button
-              onClick={() => {
-                // Reset
-                setResult(null)
-              }}
-              className="flex-1 bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded border border-gray-300 transition-colors"
-            >
-              Nuevo Cálculo
-            </button>
-            
-            {config.features.exportable && (
+          <div className="flex flex-col gap-3 mt-4">
+            <div className="flex gap-3">
               <button
-                onClick={() => setShowExportModal(true)}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                onClick={() => {
+                  // Reset
+                  setResult(null)
+                }}
+                className="flex-1 bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded border border-gray-300 transition-colors"
               >
-                📄 Exportar Cotización
+                Nuevo Cálculo
               </button>
-            )}
+              
+              {config.features.exportable && (
+                <button
+                  onClick={() => setShowExportModal(true)}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                >
+                  📄 Exportar Cotización
+                </button>
+              )}
+            </div>
+            
+            <button
+              onClick={() => setShowMaterialComparison(!showMaterialComparison)}
+              className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors shadow-lg"
+            >
+              {showMaterialComparison ? '❌ Ocultar' : '🎨 Comparar con Otros Materiales'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Comparativa de Materiales */}
+      {showMaterialComparison && result && (
+        <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg shadow-lg p-6 space-y-4 border-2 border-purple-300">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-purple-900">🎨 Comparativa de Materiales</h2>
+            <p className="text-sm text-purple-700 mt-1">
+              Compara cuánto costaría esta pieza con diferentes filamentos
+            </p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Object.entries(MATERIAL_PRICES).map(([key, material]) => {
+              // Calcular con el nuevo precio de material
+              const pesoReal = result.breakdown.pesoReal
+              const costoMaterial = (pesoReal * material.precio) / 1000
+              const costoSinMaterial = result.costos.total - result.costos.material
+              const costoTotalNuevo = costoMaterial + costoSinMaterial
+              const precioConMargen = costoTotalNuevo * (1 + inputs.margenGanancia / 100)
+              
+              // Calcular descuento
+              let descuento = 0
+              if (inputs.cantidad >= 100) descuento = 15
+              else if (inputs.cantidad >= 50) descuento = 10
+              else if (inputs.cantidad >= 20) descuento = 7
+              else if (inputs.cantidad >= 10) descuento = 5
+              
+              const precioFinal = precioConMargen * (1 - descuento / 100)
+              const precioTotal = precioFinal * inputs.cantidad
+              const diferencia = precioFinal - result.precioUnitario
+              const porcentajeDif = ((diferencia / result.precioUnitario) * 100)
+              
+              const esActual = Math.abs(material.precio - inputs.precioKgFilamento) < 1
+              
+              return (
+                <div
+                  key={key}
+                  className={`bg-white rounded-lg p-4 border-2 transition-all ${
+                    esActual 
+                      ? 'border-green-400 shadow-lg ring-2 ring-green-300' 
+                      : 'border-gray-200 hover:border-purple-300'
+                  }`}
+                >
+                  <div className="text-center">
+                    <div className="text-3xl mb-2">{material.emoji}</div>
+                    <h3 className="font-bold text-gray-900">{material.nombre}</h3>
+                    {esActual && (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-semibold">
+                        Actual
+                      </span>
+                    )}
+                    <p className="text-xs text-gray-500 mt-1">${material.precio}/kg</p>
+                  </div>
+                  
+                  <div className="mt-3 space-y-2">
+                    <div className="text-center p-2 bg-gray-50 rounded">
+                      <p className="text-xs text-gray-600">Costo unitario</p>
+                      <p className="text-lg font-bold text-gray-900">${costoTotalNuevo.toFixed(2)}</p>
+                    </div>
+                    
+                    {inputs.margenGanancia > 0 && (
+                      <div className="text-center p-2 bg-purple-50 rounded">
+                        <p className="text-xs text-purple-700">Precio de venta</p>
+                        <p className="text-lg font-bold text-purple-900">${precioFinal.toFixed(2)}</p>
+                        {diferencia !== 0 && (
+                          <p className={`text-xs font-semibold mt-1 ${diferencia > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {diferencia > 0 ? '+' : ''}{porcentajeDif.toFixed(1)}%
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    
+                    {inputs.cantidad > 1 && (
+                      <div className="text-center p-2 bg-blue-50 rounded border border-blue-200">
+                        <p className="text-xs text-blue-700">Total ({inputs.cantidad} pzs)</p>
+                        <p className="text-sm font-bold text-blue-900">${precioTotal.toFixed(2)}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          
+          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 flex items-start gap-2">
+            <span className="text-yellow-600">💡</span>
+            <p className="text-xs text-yellow-800">
+              <span className="font-semibold">Tip:</span> Los precios pueden variar según la marca y proveedor. 
+              Estos son precios promedio del mercado mexicano. PLA y PLA+ son ideales para piezas decorativas, 
+              PETG para piezas funcionales, ABS/ASA para exteriores, TPU para piezas flexibles.
+            </p>
           </div>
         </div>
       )}
@@ -2008,6 +2453,20 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                   ⭐ Personalizada
                 </button>
               </div>
+            </div>
+            
+            {/* Campo nombre del cliente (siempre visible) */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Nombre del cliente (opcional)
+              </label>
+              <input
+                type="text"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="Ej: Juan Pérez"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+              />
             </div>
             
             {/* Opciones de personalización */}

@@ -2,8 +2,8 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Comunidad MakerHUB | Únete a nosotros',
-  description: 'Únete a la comunidad MakerHUB by Dofer. Comparte proyectos, aprende y conecta con makers de todo el mundo.',
+  title: 'Comunidad Dofer Labs, MakerHub | Únete a nosotros',
+  description: 'Únete a la comunidad Dofer Labs, MakerHub. Comparte proyectos, aprende y conecta con makers de todo el mundo.',
 }
 
 export default function ComunidadPage() {
@@ -16,7 +16,7 @@ export default function ComunidadPage() {
             href="/" 
             className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent hover:from-purple-700 hover:to-pink-700 transition-all"
           >
-            MakerHUB by Dofer
+            Dofer Labs, MakerHub
           </Link>
           <Link
             href="/"
@@ -34,7 +34,7 @@ export default function ComunidadPage() {
           <div className="text-center space-y-6">
             <div className="text-6xl mb-4 animate-bounce">🚀</div>
             <h1 className="text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-purple-600 via-pink-600 to-purple-600 bg-clip-text text-transparent">
-              Bienvenido a la Comunidad MakerHUB
+              Bienvenido a la Comunidad Dofer Labs, MakerHub
             </h1>
             <p className="text-xl text-gray-700 max-w-2xl mx-auto leading-relaxed">
               Un espacio donde los makers se conectan, comparten y crecen juntos
@@ -49,7 +49,7 @@ export default function ComunidadPage() {
             </div>
             <div className="prose prose-lg max-w-none text-gray-700 leading-relaxed">
               <p>
-                En <strong>MakerHUB by Dofer</strong>, creemos que el conocimiento debe ser libre y accesible para todos. 
+                En <strong>Dofer Labs, MakerHub</strong>, creemos que el conocimiento debe ser libre y accesible para todos. 
                 Nuestra misión es construir una comunidad vibrante donde makers de todos los niveles puedan:
               </p>
               <ul className="space-y-2 mt-4">
@@ -193,60 +193,6 @@ export default function ComunidadPage() {
             <p className="text-sm text-purple-200 mt-6">
               🌟 Completamente gratis • Sin spam • 100% makers
             </p>
-          </div>
-
-          {/* Testimonios imaginarios */}
-          <div className="space-y-6">
-            <div className="text-center">
-              <h2 className="text-3xl font-bold text-gray-900">Lo que dicen nuestros makers</h2>
-            </div>
-            
-            <div className="grid md:grid-cols-3 gap-6">
-              <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center text-white font-bold text-xl">
-                    A
-                  </div>
-                  <div>
-                    <div className="font-bold text-gray-900">Ana M.</div>
-                    <div className="text-xs text-gray-500">Maker desde 2023</div>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-700 italic">
-                  "Esta comunidad me ayudó a resolver problemas de calibración que llevaba meses intentando solucionar. ¡Increíble el apoyo!"
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-400 flex items-center justify-center text-white font-bold text-xl">
-                    C
-                  </div>
-                  <div>
-                    <div className="font-bold text-gray-900">Carlos R.</div>
-                    <div className="text-xs text-gray-500">Maker desde 2021</div>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-700 italic">
-                  "Las herramientas gratuitas son un salvavidas. Y la comunidad es súper activa y dispuesta a ayudar."
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-400 to-blue-400 flex items-center justify-center text-white font-bold text-xl">
-                    M
-                  </div>
-                  <div>
-                    <div className="font-bold text-gray-900">María L.</div>
-                    <div className="text-xs text-gray-500">Maker desde 2024</div>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-700 italic">
-                  "Empecé hace poco y aquí encontré todo lo que necesitaba para dar mis primeros pasos. ¡100% recomendado!"
-                </p>
-              </div>
-            </div>
           </div>
         </div>
       </main>

@@ -10,7 +10,7 @@ const eventSchema = z.object({
   toolId: z.string().optional(),
   sessionId: z.string().optional(),
   userId: z.string().optional(),
-  metadata: z.record(z.any()).optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
 })
 
 // Tipos de eventos permitidos
@@ -149,9 +149,9 @@ export async function PUT(request: NextRequest) {
 
     // Validar todos los eventos
     const validEvents = body.events
-      .map(event => eventSchema.safeParse(event))
-      .filter(result => result.success)
-      .map(result => (result as any).data)
+      .map((event: any) => eventSchema.safeParse(event))
+      .filter((result: any) => result.success)
+      .map((result: any) => (result as any).data)
 
     if (validEvents.length === 0) {
       return NextResponse.json(
@@ -160,28 +160,29 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    // Guardar todos los eventos
+    // Guardar todos los eventos (deshabilitado - base de datos en desarrollo)
     const userAgent = request.headers.get('user-agent') || 'unknown'
     const referer = request.headers.get('referer') || 'direct'
     const ip = request.headers.get('x-forwarded-for') || 
                request.headers.get('x-real-ip') || 
                'unknown'
 
-    await prisma.event.createMany({
-      data: validEvents.map(event => ({
-        eventType: event.eventType,
-        toolId: event.toolId || null,
-        sessionId: event.sessionId || null,
-        userId: event.userId || null,
-        metadata: {
-          ...event.metadata,
-          userAgent,
-          referer,
-          ipHash: ip !== 'unknown' ? hashIP(ip) : 'unknown',
-          timestamp: new Date().toISOString(),
-        },
-      }))
-    })
+    console.log('Batch events tracked:', validEvents.length)
+    // await prisma.event.createMany({
+    //   data: validEvents.map((event: any) => ({
+    //     eventType: event.eventType,
+    //     toolId: event.toolId || null,
+    //     sessionId: event.sessionId || null,
+    //     userId: event.userId || null,
+    //     metadata: {
+    //       ...event.metadata,
+    //       userAgent,
+    //       referer,
+    //       ipHash: ip !== 'unknown' ? hashIP(ip) : 'unknown',
+    //       timestamp: new Date().toISOString(),
+    //     },
+    //   }))
+    // })
 
     return NextResponse.json({ 
       success: true, 

@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:16-alpine
+    container_name: makerhub-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-makerhub}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - makerhub-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Aplicación Next.js
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: makerhub-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-makerhub}?schema=public
+      NEXT_PUBLIC_APP_URL: https://makerhub.dofer.com.mx
+      # Agregar más variables de entorno según sea necesario
+    expose:
+      - "3250"
+    networks:
+      - makerhub-network
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.makerhub.rule=Host(`makerhub.dofer.com.mx`)"
+      - "traefik.http.routers.makerhub.entrypoints=websecure"
+      - "traefik.http.routers.makerhub.tls=true"
+      - "traefik.http.routers.makerhub.tls.certresolver=letsencrypt"
+      - "traefik.http.services.makerhub.loadbalancer.server.port=3250"
+      - "traefik.docker.network=dokploy-network"
+
+networks:
+  makerhub-network:
+    driver: bridge
+  dokploy-network:
+    external: true
+
+volumes:
+  postgres_data:
+    driver: local

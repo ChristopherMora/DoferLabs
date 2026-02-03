@@ -1,6 +1,15 @@
 'use client'
 
+import { Suspense } from 'react'
 import { usePageTracking } from '@/lib/analytics/hooks'
+
+/**
+ * Componente interno que usa useSearchParams
+ */
+function AnalyticsTracker() {
+  usePageTracking()
+  return null
+}
 
 /**
  * Proveedor de Analytics que inicializa tracking automático
@@ -11,8 +20,12 @@ export default function AnalyticsProvider({
 }: {
   children: React.ReactNode
 }) {
-  // Hook que trackea automáticamente cambios de página
-  usePageTracking()
-
-  return <>{children}</>
+  return (
+    <>
+      <Suspense fallback={null}>
+        <AnalyticsTracker />
+      </Suspense>
+      {children}
+    </>
+  )
 }
