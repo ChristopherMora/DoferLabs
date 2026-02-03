@@ -1943,20 +1943,46 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         </div>
 
         {/* Margen (opcional) */}
-        <div className="space-y-2">
+        <div className="space-y-2 border-t pt-4">
           <label className="block text-sm font-medium text-gray-700">
-            Tu ganancia (%) - Opcional
-            <InfoTooltip text="¿Cuánto quieres ganar? Este porcentaje se suma al costo total para obtener tu precio de venta. Ejemplo: si tus costos son $100 y pones 30%, cobrarás $130 (ganando $30)." />
+            💰 ¿Cuánto quieres ganar por este trabajo? (%)
+            <InfoTooltip text="Este es TU margen de ganancia. Se suma a todos los costos (material + energía + depreciación) para calcular el precio final que le cobrarás al cliente. Ejemplo: costos $100 + 50% ganancia = cobras $150 (te quedas con $50)." />
           </label>
           <input
             type="number"
             value={inputs.margenGanancia === 0 ? '' : inputs.margenGanancia}
             onChange={(e) => handleInputChange('margenGanancia', e.target.value === '' ? 0 : parseFloat(e.target.value))}
-            placeholder="Ej: 30"
-            className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
+            placeholder="Ej: 50"
+            className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all"
             min="0"
             step="5"
           />
+          {inputs.margenGanancia > 0 && inputs.pesoGramos > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-green-700 font-medium">Tu ganancia estimada:</span>
+                <span className="text-lg font-bold text-green-600">
+                  {(() => {
+                    // Calcular ganancia estimada rápidamente
+                    const pesoReal = inputs.pesoGramos * (1 + inputs.porcentajeMerma / 100)
+                    const costoMaterial = (pesoReal * inputs.precioKgFilamento) / 1000
+                    const energiaKwh = (inputs.consumoWatts * inputs.horasImpresion) / 1000
+                    const costoEnergia = energiaKwh * inputs.precioKwh
+                    let costoDepreciacion = 0
+                    if (inputs.precioImpresora && inputs.vidaUtilHoras) {
+                      costoDepreciacion = (inputs.precioImpresora / inputs.vidaUtilHoras) * inputs.horasImpresion
+                    }
+                    const costoTotal = costoMaterial + costoEnergia + costoDepreciacion
+                    const ganancia = costoTotal * (inputs.margenGanancia / 100)
+                    return `$${ganancia.toFixed(2)} MXN`
+                  })()}
+                </span>
+              </div>
+              <p className="text-xs text-green-600 mt-1">
+                Precio final = costos + {inputs.margenGanancia}% ganancia
+              </p>
+            </div>
+          )}
           <p className="text-xs text-gray-500">💡 Recomendado: 25-40% para piezas estándar, 50-100% para diseños personalizados</p>
         </div>
 
