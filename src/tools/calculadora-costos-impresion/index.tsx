@@ -1204,12 +1204,15 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       // Track evento de ejecución con metadata detallada
       trackExecution({
         pesoGramos: validated.pesoGramos,
-        costoTotal: costoTotal,
-        conMargen: conMargen,
+        costoTotal: costoPorPieza,
+        conMargen: precioConMargenUnitario,
         costoMaterial,
         costoEnergia,
         costoDepreciacion,
         margenGanancia: validated.margenGanancia,
+        cantidad: validated.cantidad,
+        descuentoVolumen,
+        precioTotal,
       })
       
       // Callback
@@ -1224,7 +1227,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       
       // Track result viewed
       trackResult({
-        costoFinal: conMargen,
+        costoFinal: precioTotal,
       })
       
     } catch (error) {
