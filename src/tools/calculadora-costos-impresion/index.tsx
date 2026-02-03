@@ -12,7 +12,7 @@ import autoTable from 'jspdf-autotable'
 import { useToolTracking } from '@/lib/analytics/hooks'
 import { validateFile, ALLOWED_EXTENSIONS } from '@/lib/security/file-validation'
 import type { ToolProps } from '../types'
-import { calculatorInputSchema, type CalculatorInput, type CalculatorResult } from './schema'
+import { calculatorInputSchema, type CalculatorInput, type CalculatorResult, MATERIAL_PRICES } from './schema'
 import { config } from './tool.config'
 
 // Base de datos de consumo de energía por impresora (en Watts promedio para PLA)
@@ -249,6 +249,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     pesoGramos: 0,
     precioKgFilamento: 0,
     porcentajeMerma: 0,
+    cantidad: 1,
     horasImpresion: 0,
     consumoWatts: 0,
     precioKwh: 2.5,
@@ -283,6 +284,9 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
   const [businessName, setBusinessName] = useState<string>('')
   const [businessLogo, setBusinessLogo] = useState<string>('')
   const [clientName, setClientName] = useState<string>('')
+  
+  // State para comparativa de materiales
+  const [showMaterialComparison, setShowMaterialComparison] = useState<boolean>(false)
 
   /**
    * Parsea archivos de slicer (.gcode o .3mf) para extraer datos
@@ -1151,8 +1155,25 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
       // Costo de mano de obra (post-procesamiento)
       const costoManoObra = validated.costoManoObra || 0
       
-      const costoTotal = costoMaterial + costoEnergia + costoDepreciacion + costoManoObra
-      const conMargen = costoTotal + (costoTotal * (validated.margenGanancia / 100))
+      // Costo por pieza individual
+      const costoPorPieza = costoMaterial + costoEnergia + costoDepreciacion + costoManoObra
+      const precioConMargenUnitario = costoPorPieza + (costoPorPieza * (validated.margenGanancia / 100))
+      
+      // Calcular descuento por volumen
+      let descuentoVolumen = 0
+      if (validated.cantidad >= 100) {
+        descuentoVolumen = 15 // 15% descuento para 100+ piezas
+      } else if (validated.cantidad >= 50) {
+        descuentoVolumen = 10 // 10% descuento para 50+ piezas
+      } else if (validated.cantidad >= 20) {
+        descuentoVolumen = 7 // 7% descuento para 20+ piezas
+      } else if (validated.cantidad >= 10) {
+        descuentoVolumen = 5 // 5% descuento para 10+ piezas
+      }
+      
+      // Aplicar descuento
+      const precioFinalUnitario = precioConMargenUnitario * (1 - descuentoVolumen / 100)
+      const precioTotal = precioFinalUnitario * validated.cantidad
       
       const resultado: CalculatorResult = {
         costos: {
@@ -1160,10 +1181,14 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           energia: costoEnergia,
           depreciacion: costoDepreciacion,
           manoObra: costoManoObra,
-          tiempo: 0, // Por ahora no valoramos el tiempo
-          total: costoTotal,
+          tiempo: 0,
+          total: costoPorPieza,
         },
-        conMargen,
+        conMargen: precioConMargenUnitario,
+        cantidad: validated.cantidad,
+        precioUnitario: precioFinalUnitario,
+        precioTotal: precioTotal,
+        descuentoVolumen: descuentoVolumen,
         breakdown: {
           pesoUsado: validated.pesoGramos,
           pesoReal,
@@ -1219,6 +1244,9 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
               break
             case 'precioKgFilamento':
               fieldErrors[field] = '⚠️ Te falta llenar el precio del filamento por kilo'
+              break
+            case 'cantidad':
+              fieldErrors[field] = '⚠️ La cantidad debe ser al menos 1 pieza'
               break
             case 'horasImpresion':
               fieldErrors[field] = '⚠️ Te falta llenar las horas de impresión (mínimo 0.01h)'
@@ -1847,6 +1875,42 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           <p className="text-xs text-gray-500">Típico FDM: 10% | MSLA: 30%</p>
         </div>
 
+        {/* Cantidad de piezas */}
+        <div className="space-y-2 bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-lg border-2 border-purple-200">
+          <label className="block text-base font-semibold text-purple-900">
+            📦 ¿Cuántas piezas necesitas?
+            <InfoTooltip text="Cantidad total de piezas idénticas a imprimir. Obtendrás descuentos automáticos por volumen: 10+ piezas (-5%), 20+ piezas (-7%), 50+ piezas (-10%), 100+ piezas (-15%)" />
+          </label>
+          <input
+            type="number"
+            value={inputs.cantidad}
+            onChange={(e) => {
+              const cantidad = e.target.value === '' ? 1 : Math.max(1, parseInt(e.target.value))
+              handleInputChange('cantidad', cantidad)
+            }}
+            placeholder="1"
+            className="w-full px-4 py-3 text-xl font-bold text-purple-900 border-2 border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white transition-all"
+            min="1"
+            step="1"
+          />
+          {inputs.cantidad >= 10 && (
+            <div className="bg-purple-100 border border-purple-300 rounded p-2 text-sm">
+              <span className="font-bold text-purple-700">
+                🎉 {inputs.cantidad >= 100 ? '15%' : inputs.cantidad >= 50 ? '10%' : inputs.cantidad >= 20 ? '7%' : '5%'} de descuento por volumen
+              </span>
+              <p className="text-xs text-purple-600 mt-1">
+                {inputs.cantidad >= 100 && 'Producción masiva: 100+ piezas'}
+                {inputs.cantidad >= 50 && inputs.cantidad < 100 && 'Lote grande: 50-99 piezas'}
+                {inputs.cantidad >= 20 && inputs.cantidad < 50 && 'Lote mediano: 20-49 piezas'}
+                {inputs.cantidad >= 10 && inputs.cantidad < 20 && 'Lote pequeño: 10-19 piezas'}
+              </p>
+            </div>
+          )}
+          <p className="text-xs text-purple-700">
+            💡 <span className="font-semibold">Descuentos:</span> 10+ (-5%) • 20+ (-7%) • 50+ (-10%) • 100+ (-15%)
+          </p>
+        </div>
+
         {/* Tiempo */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-700">
@@ -2019,33 +2083,63 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                   costoDepreciacion = (inputs.precioImpresora / inputs.vidaUtilHoras) * inputs.horasImpresion
                 }
                 const costoManoObra = inputs.costoManoObra || 0
-                const costoTotal = costoMaterial + costoEnergia + costoDepreciacion + costoManoObra
-                const ganancia = costoTotal * (inputs.margenGanancia / 100)
-                const precioVenta = costoTotal + ganancia
+                const costoPorPieza = costoMaterial + costoEnergia + costoDepreciacion + costoManoObra
+                const precioConMargen = costoPorPieza + (costoPorPieza * (inputs.margenGanancia / 100))
+                
+                // Calcular descuento
+                let descuento = 0
+                if (inputs.cantidad >= 100) descuento = 15
+                else if (inputs.cantidad >= 50) descuento = 10
+                else if (inputs.cantidad >= 20) descuento = 7
+                else if (inputs.cantidad >= 10) descuento = 5
+                
+                const precioFinal = precioConMargen * (1 - descuento / 100)
+                const gananciaUnitaria = precioFinal - costoPorPieza
+                const gananciaTotal = gananciaUnitaria * inputs.cantidad
+                const precioTotal = precioFinal * inputs.cantidad
 
                 return (
                   <>
                     <div className="text-center pb-3 border-b border-gray-200">
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Te quedarás con</p>
-                      <p className="text-3xl font-bold text-green-600">${ganancia.toFixed(2)}</p>
-                      <p className="text-xs text-gray-500 mt-1">de ganancia neta</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                        {inputs.cantidad > 1 ? `Ganancia total (${inputs.cantidad} piezas)` : 'Te quedarás con'}
+                      </p>
+                      <p className="text-3xl font-bold text-green-600">${gananciaTotal.toFixed(2)}</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {inputs.cantidad > 1 ? `$${gananciaUnitaria.toFixed(2)} por pieza` : 'de ganancia neta'}
+                      </p>
                     </div>
                     
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div className="text-center p-2 bg-gray-50 rounded">
-                        <p className="text-gray-600 text-xs mb-1">Tus costos</p>
-                        <p className="font-bold text-gray-900">${costoTotal.toFixed(2)}</p>
+                        <p className="text-gray-600 text-xs mb-1">Costo {inputs.cantidad > 1 ? 'unitario' : 'total'}</p>
+                        <p className="font-bold text-gray-900">${costoPorPieza.toFixed(2)}</p>
                       </div>
                       <div className="text-center p-2 bg-green-100 rounded">
-                        <p className="text-green-700 text-xs mb-1">Precio a cobrar</p>
-                        <p className="font-bold text-green-700">${precioVenta.toFixed(2)}</p>
+                        <p className="text-green-700 text-xs mb-1">Precio {inputs.cantidad > 1 ? 'unitario' : 'total'}</p>
+                        <p className="font-bold text-green-700">${precioFinal.toFixed(2)}</p>
+                        {descuento > 0 && (
+                          <p className="text-xs text-purple-600">-{descuento}% desc.</p>
+                        )}
                       </div>
                     </div>
 
+                    {inputs.cantidad > 1 && (
+                      <div className="bg-purple-50 border border-purple-200 rounded p-3 text-center">
+                        <p className="text-sm font-bold text-purple-900">
+                          Precio total: ${precioTotal.toFixed(2)} MXN
+                        </p>
+                        <p className="text-xs text-purple-600 mt-1">
+                          {inputs.cantidad} × ${precioFinal.toFixed(2)}
+                          {descuento > 0 && ` (con ${descuento}% descuento)`}
+                        </p>
+                      </div>
+                    )}
+
                     <div className="bg-blue-50 border border-blue-200 rounded p-2 text-xs text-center text-blue-800">
-                      📊 Cobrarás <span className="font-bold">${precioVenta.toFixed(2)}</span>, 
-                      de los cuales <span className="font-bold">${costoTotal.toFixed(2)}</span> cubren tus costos 
-                      y <span className="font-bold text-green-600">${ganancia.toFixed(2)}</span> es tu ganancia ({inputs.margenGanancia}%)
+                      📊 {inputs.cantidad > 1 ? `Por ${inputs.cantidad} piezas: ` : ''}
+                      Cobrarás <span className="font-bold">${(inputs.cantidad > 1 ? precioTotal : precioFinal).toFixed(2)}</span>, 
+                      ganancia de <span className="font-bold text-green-600">${gananciaTotal.toFixed(2)}</span> ({inputs.margenGanancia}%)
                     </div>
                   </>
                 )
@@ -2108,17 +2202,53 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg shadow-lg p-6 space-y-4">
           <h2 className="text-2xl font-bold text-blue-900">Resultado</h2>
           
+          {/* Cantidad y descuento */}
+          {result.cantidad > 1 && (
+            <div className="bg-purple-100 border-2 border-purple-300 rounded-lg p-4 text-center">
+              <p className="text-sm text-purple-700 font-semibold">
+                📦 Cotización para {result.cantidad} piezas idénticas
+              </p>
+              {result.descuentoVolumen > 0 && (
+                <p className="text-xs text-purple-600 mt-1">
+                  ✨ Descuento por volumen aplicado: {result.descuentoVolumen}%
+                </p>
+              )}
+            </div>
+          )}
+          
           {/* Costo total destacado */}
           <div className="bg-white rounded-lg p-6 text-center">
-            <p className="text-gray-600 text-sm uppercase tracking-wide">Costo Total</p>
+            <p className="text-gray-600 text-sm uppercase tracking-wide">
+              {result.cantidad > 1 ? 'Costo por Pieza' : 'Costo Total'}
+            </p>
             <p className="text-5xl font-bold text-blue-600">
               ${result.costos.total.toFixed(2)} MXN
             </p>
             {inputs.margenGanancia > 0 && (
-              <div className="mt-3 pt-3 border-t border-gray-200">
-                <p className="text-sm text-gray-600 mb-1">Precio de venta (con {inputs.margenGanancia}% de ganancia):</p>
-                <p className="text-3xl font-bold text-green-600">${result.conMargen.toFixed(2)} MXN</p>
-                <p className="text-xs text-gray-500 mt-1">Tu ganancia: ${(result.conMargen - result.costos.total).toFixed(2)} MXN</p>
+              <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">
+                    Precio {result.cantidad > 1 ? 'unitario' : 'de venta'} (con {inputs.margenGanancia}% de ganancia
+                    {result.descuentoVolumen > 0 && ` y ${result.descuentoVolumen}% descuento`}):
+                  </p>
+                  <p className="text-3xl font-bold text-green-600">${result.precioUnitario.toFixed(2)} MXN</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Tu ganancia: ${(result.precioUnitario - result.costos.total).toFixed(2)} MXN por pieza
+                  </p>
+                </div>
+                
+                {result.cantidad > 1 && (
+                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-4 border-2 border-purple-200">
+                    <p className="text-sm text-purple-700 font-semibold mb-1">💰 PRECIO TOTAL DEL PEDIDO</p>
+                    <p className="text-4xl font-bold text-purple-900">${result.precioTotal.toFixed(2)} MXN</p>
+                    <p className="text-xs text-purple-600 mt-2">
+                      {result.cantidad} piezas × ${result.precioUnitario.toFixed(2)} = ${result.precioTotal.toFixed(2)}
+                    </p>
+                    <p className="text-sm font-bold text-green-600 mt-2">
+                      Ganancia total: ${((result.precioUnitario - result.costos.total) * result.cantidad).toFixed(2)} MXN
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2161,25 +2291,128 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           </div>
 
           {/* CTAs */}
-          <div className="flex gap-3 mt-4">
-            <button
-              onClick={() => {
-                // Reset
-                setResult(null)
-              }}
-              className="flex-1 bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded border border-gray-300 transition-colors"
-            >
-              Nuevo Cálculo
-            </button>
-            
-            {config.features.exportable && (
+          <div className="flex flex-col gap-3 mt-4">
+            <div className="flex gap-3">
               <button
-                onClick={() => setShowExportModal(true)}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                onClick={() => {
+                  // Reset
+                  setResult(null)
+                }}
+                className="flex-1 bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded border border-gray-300 transition-colors"
               >
-                📄 Exportar Cotización
+                Nuevo Cálculo
               </button>
-            )}
+              
+              {config.features.exportable && (
+                <button
+                  onClick={() => setShowExportModal(true)}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                >
+                  📄 Exportar Cotización
+                </button>
+              )}
+            </div>
+            
+            <button
+              onClick={() => setShowMaterialComparison(!showMaterialComparison)}
+              className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors shadow-lg"
+            >
+              {showMaterialComparison ? '❌ Ocultar' : '🎨 Comparar con Otros Materiales'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Comparativa de Materiales */}
+      {showMaterialComparison && result && (
+        <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg shadow-lg p-6 space-y-4 border-2 border-purple-300">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-purple-900">🎨 Comparativa de Materiales</h2>
+            <p className="text-sm text-purple-700 mt-1">
+              Compara cuánto costaría esta pieza con diferentes filamentos
+            </p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Object.entries(MATERIAL_PRICES).map(([key, material]) => {
+              // Calcular con el nuevo precio de material
+              const pesoReal = result.breakdown.pesoReal
+              const costoMaterial = (pesoReal * material.precio) / 1000
+              const costoSinMaterial = result.costos.total - result.costos.material
+              const costoTotalNuevo = costoMaterial + costoSinMaterial
+              const precioConMargen = costoTotalNuevo * (1 + inputs.margenGanancia / 100)
+              
+              // Calcular descuento
+              let descuento = 0
+              if (inputs.cantidad >= 100) descuento = 15
+              else if (inputs.cantidad >= 50) descuento = 10
+              else if (inputs.cantidad >= 20) descuento = 7
+              else if (inputs.cantidad >= 10) descuento = 5
+              
+              const precioFinal = precioConMargen * (1 - descuento / 100)
+              const precioTotal = precioFinal * inputs.cantidad
+              const diferencia = precioFinal - result.precioUnitario
+              const porcentajeDif = ((diferencia / result.precioUnitario) * 100)
+              
+              const esActual = Math.abs(material.precio - inputs.precioKgFilamento) < 1
+              
+              return (
+                <div
+                  key={key}
+                  className={`bg-white rounded-lg p-4 border-2 transition-all ${
+                    esActual 
+                      ? 'border-green-400 shadow-lg ring-2 ring-green-300' 
+                      : 'border-gray-200 hover:border-purple-300'
+                  }`}
+                >
+                  <div className="text-center">
+                    <div className="text-3xl mb-2">{material.emoji}</div>
+                    <h3 className="font-bold text-gray-900">{material.nombre}</h3>
+                    {esActual && (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-semibold">
+                        Actual
+                      </span>
+                    )}
+                    <p className="text-xs text-gray-500 mt-1">${material.precio}/kg</p>
+                  </div>
+                  
+                  <div className="mt-3 space-y-2">
+                    <div className="text-center p-2 bg-gray-50 rounded">
+                      <p className="text-xs text-gray-600">Costo unitario</p>
+                      <p className="text-lg font-bold text-gray-900">${costoTotalNuevo.toFixed(2)}</p>
+                    </div>
+                    
+                    {inputs.margenGanancia > 0 && (
+                      <div className="text-center p-2 bg-purple-50 rounded">
+                        <p className="text-xs text-purple-700">Precio de venta</p>
+                        <p className="text-lg font-bold text-purple-900">${precioFinal.toFixed(2)}</p>
+                        {diferencia !== 0 && (
+                          <p className={`text-xs font-semibold mt-1 ${diferencia > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {diferencia > 0 ? '+' : ''}{porcentajeDif.toFixed(1)}%
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    
+                    {inputs.cantidad > 1 && (
+                      <div className="text-center p-2 bg-blue-50 rounded border border-blue-200">
+                        <p className="text-xs text-blue-700">Total ({inputs.cantidad} pzs)</p>
+                        <p className="text-sm font-bold text-blue-900">${precioTotal.toFixed(2)}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          
+          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 flex items-start gap-2">
+            <span className="text-yellow-600">💡</span>
+            <p className="text-xs text-yellow-800">
+              <span className="font-semibold">Tip:</span> Los precios pueden variar según la marca y proveedor. 
+              Estos son precios promedio del mercado mexicano. PLA y PLA+ son ideales para piezas decorativas, 
+              PETG para piezas funcionales, ABS/ASA para exteriores, TPU para piezas flexibles.
+            </p>
           </div>
         </div>
       )}
