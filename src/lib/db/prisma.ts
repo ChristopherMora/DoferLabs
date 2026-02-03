@@ -6,14 +6,11 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-function createPrismaClient() {
-  // En Prisma 7, necesitamos usar un adaptador para conexiones directas
+function createPrismaClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL
   
   if (!connectionString) {
-    console.warn('DATABASE_URL not set, Prisma client may not work')
-    // Retornar cliente sin adaptador para build time
-    return new PrismaClient()
+    throw new Error('DATABASE_URL environment variable is not set')
   }
   
   const pool = new Pool({ connectionString })
@@ -25,6 +22,18 @@ function createPrismaClient() {
   })
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient()
+// Lazy initialization - solo crea el cliente cuando se accede
+function getPrismaClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createPrismaClient()
+  }
+  return globalForPrisma.prisma
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+// Exportar un proxy que inicializa lazy
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    const client = getPrismaClient()
+    return Reflect.get(client, prop)
+  }
+})
