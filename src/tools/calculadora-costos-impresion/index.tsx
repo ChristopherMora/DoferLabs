@@ -254,6 +254,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     precioKwh: 2.5,
     precioImpresora: 0,
     vidaUtilHoras: 0,
+    costoManoObra: 0,
     margenGanancia: 0,
   })
   
@@ -1147,7 +1148,10 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         costoDepreciacion = (validated.precioImpresora / validated.vidaUtilHoras) * validated.horasImpresion
       }
       
-      const costoTotal = costoMaterial + costoEnergia + costoDepreciacion
+      // Costo de mano de obra (post-procesamiento)
+      const costoManoObra = validated.costoManoObra || 0
+      
+      const costoTotal = costoMaterial + costoEnergia + costoDepreciacion + costoManoObra
       const conMargen = costoTotal + (costoTotal * (validated.margenGanancia / 100))
       
       const resultado: CalculatorResult = {
@@ -1155,6 +1159,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           material: costoMaterial,
           energia: costoEnergia,
           depreciacion: costoDepreciacion,
+          manoObra: costoManoObra,
           tiempo: 0, // Por ahora no valoramos el tiempo
           total: costoTotal,
         },
@@ -1942,6 +1947,37 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           </div>
         </div>
 
+        {/* Mano de obra */}
+        <div className="space-y-2 border-t pt-4">
+          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">🔧 Mano de Obra (Opcional)</h3>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Costo de post-procesamiento
+              <InfoTooltip text="Si la pieza requiere trabajo manual adicional como limpieza, lijado, pintura, ensamblaje, etc., ingresa aquí el costo que le asignas a ese trabajo. Ejemplo: $50 por limpieza + $100 por pintura = $150 total" />
+            </label>
+            <input
+              type="number"
+              value={inputs.costoManoObra === 0 ? '' : inputs.costoManoObra}
+              onChange={(e) => handleInputChange('costoManoObra', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+              placeholder="Ej: 150 (opcional)"
+              className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all"
+              min="0"
+              step="10"
+            />
+            {inputs.costoManoObra > 0 && (
+              <div className="flex items-center gap-2 text-sm bg-blue-50 border border-blue-200 rounded p-2">
+                <span>✅</span>
+                <span className="text-blue-700">
+                  Se agregarán <span className="font-bold">${inputs.costoManoObra.toFixed(2)}</span> por trabajo manual
+                </span>
+              </div>
+            )}
+            <p className="text-xs text-gray-500">
+              💡 <span className="font-semibold">Ejemplos:</span> Limpieza ($20-50), Lijado ($30-80), Pintura ($50-200), Ensamblaje ($40-150)
+            </p>
+          </div>
+        </div>
+
         {/* Margen (opcional) */}
         <div className="space-y-3 border-t pt-4 bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg">
           <div className="flex items-start gap-2">
@@ -1982,7 +2018,8 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                 if (inputs.precioImpresora && inputs.vidaUtilHoras) {
                   costoDepreciacion = (inputs.precioImpresora / inputs.vidaUtilHoras) * inputs.horasImpresion
                 }
-                const costoTotal = costoMaterial + costoEnergia + costoDepreciacion
+                const costoManoObra = inputs.costoManoObra || 0
+                const costoTotal = costoMaterial + costoEnergia + costoDepreciacion + costoManoObra
                 const ganancia = costoTotal * (inputs.margenGanancia / 100)
                 const precioVenta = costoTotal + ganancia
 
@@ -2079,7 +2116,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
           </div>
 
           {/* Breakdown */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-white rounded-lg p-4">
               <p className="text-gray-600 text-sm">💰 Material</p>
               <p className="text-2xl font-bold text-gray-900">${result.costos.material.toFixed(2)}</p>
@@ -2103,6 +2140,16 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                 Por uso de máquina
               </p>
             </div>
+
+            {result.costos.manoObra > 0 && (
+              <div className="bg-white rounded-lg p-4 border-2 border-blue-200">
+                <p className="text-gray-600 text-sm">🔧 Mano de Obra</p>
+                <p className="text-2xl font-bold text-blue-600">${result.costos.manoObra.toFixed(2)}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Post-procesamiento
+                </p>
+              </div>
+            )}
           </div>
 
           {/* CTAs */}
