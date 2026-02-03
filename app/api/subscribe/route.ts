@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-// import { prisma } from '@/lib/db/prisma'
+import { prisma } from '@/lib/db/prisma'
 import { z } from 'zod'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/security/rate-limit'
 import { checkCsrfProtection } from '@/lib/security/csrf'
@@ -106,57 +106,50 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Base de datos deshabilitada por ahora - retornar éxito simulado
-    return NextResponse.json({
-      success: true,
-      message: '¡Gracias por tu interés! La base de datos está en desarrollo, pero tu suscripción fue registrada en logs.',
-      type
+    // Verificar si ya existe
+    const existing = await prisma.subscriber.findUnique({
+      where: { contact: normalizedContact }
     })
 
-    // Verificar si ya existe
-    // const existing = await prisma.subscriber.findUnique({
-    //   where: { contact: normalizedContact }
-    // })
-
-    // if (existing) {
-    //   // Si existe pero está inactivo, reactivar
-    //   if (!existing.active) {
-    //     await prisma.subscriber.update({
-    //       where: { id: existing.id },
-    //       data: { active: true, updatedAt: new Date() }
-    //     })
-    //     return NextResponse.json({
-    //       success: true,
-    //       message: '¡Bienvenido de nuevo! Tu suscripción ha sido reactivada.',
-    //       type
-    //     })
-    //   }
-    //   
-    //   return NextResponse.json({
-    //     success: true,
-    //     message: '¡Ya estás suscrito! Te avisaremos de nuevas herramientas.',
-    //     type
-    //   })
-    // }
+    if (existing) {
+      // Si existe pero está inactivo, reactivar
+      if (!existing.active) {
+        await prisma.subscriber.update({
+          where: { id: existing.id },
+          data: { active: true, updatedAt: new Date() }
+        })
+        return NextResponse.json({
+          success: true,
+          message: '¡Bienvenido de nuevo! Tu suscripción ha sido reactivada.',
+          type
+        })
+      }
+      
+      return NextResponse.json({
+        success: true,
+        message: '¡Ya estás suscrito! Te avisaremos de nuevas herramientas.',
+        type
+      })
+    }
 
     // Crear nuevo subscriber
-    // await prisma.subscriber.create({
-    //   data: {
-    //     contact: normalizedContact,
-    //     type,
-    //     source,
-    //     active: true,
-    //     verified: false,
-    //   }
-    // })
+    await prisma.subscriber.create({
+      data: {
+        contact: normalizedContact,
+        type,
+        source,
+        active: true,
+        verified: false,
+      }
+    })
 
-    // return NextResponse.json({
-    //   success: true,
-    //   message: type === 'email' 
-    //     ? '¡Listo! Te avisaremos cuando agreguemos nuevas herramientas.'
-    //     : '¡Perfecto! Te contactaremos por WhatsApp cuando haya novedades.',
-    //   type
-    // })
+    return NextResponse.json({
+      success: true,
+      message: type === 'email' 
+        ? '¡Listo! Te avisaremos cuando agreguemos nuevas herramientas.'
+        : '¡Perfecto! Te contactaremos por WhatsApp cuando haya novedades.',
+      type
+    })
 
   } catch (error) {
     console.error('Error al crear suscriptor:', error)

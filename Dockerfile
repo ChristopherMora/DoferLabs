@@ -47,6 +47,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 
+# Copiar script de entrada
+COPY --from=builder --chown=nextjs:nodejs /app/docker-entrypoint.sh ./docker-entrypoint.sh
+
 USER nextjs
 
 EXPOSE 3250
@@ -54,5 +57,5 @@ EXPOSE 3250
 ENV PORT=3250
 ENV HOSTNAME="0.0.0.0"
 
-# Ejecutar servidor
-CMD ["node", "server.js"]
+# Ejecutar script de entrada
+CMD ["sh", "docker-entrypoint.sh"]
