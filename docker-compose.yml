@@ -41,10 +41,21 @@ services:
       - "3250"
     networks:
       - makerhub-network
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.makerhub.rule=Host(`makerhub.dofer.com.mx`)"
+      - "traefik.http.routers.makerhub.entrypoints=websecure"
+      - "traefik.http.routers.makerhub.tls=true"
+      - "traefik.http.routers.makerhub.tls.certresolver=letsencrypt"
+      - "traefik.http.services.makerhub.loadbalancer.server.port=3250"
+      - "traefik.docker.network=dokploy-network"
 
 networks:
   makerhub-network:
     driver: bridge
+  dokploy-network:
+    external: true
 
 volumes:
   postgres_data:
