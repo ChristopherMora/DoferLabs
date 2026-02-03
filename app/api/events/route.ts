@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-// import { prisma } from '@/lib/db/prisma'
+import { prisma } from '@/lib/db/prisma'
 import { z } from 'zod'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/security/rate-limit'
 import { checkCsrfProtection } from '@/lib/security/csrf'
@@ -102,17 +102,16 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     }
 
-    // Guardar el evento en la base de datos (deshabilitado - base de datos en desarrollo)
-    console.log('Event tracked:', { eventType, toolId, sessionId, userId, metadata: enrichedMetadata })
-    // await prisma.event.create({
-    //   data: {
-    //     eventType,
-    //     toolId: toolId || null,
-    //     sessionId: sessionId || null,
-    //     userId: userId || null,
-    //     metadata: enrichedMetadata,
-    //   }
-    // })
+    // Guardar el evento en la base de datos
+    await prisma.event.create({
+      data: {
+        eventType,
+        toolId: toolId || null,
+        sessionId: sessionId || null,
+        userId: userId || null,
+        metadata: enrichedMetadata,
+      }
+    })
 
     return NextResponse.json({ success: true })
 

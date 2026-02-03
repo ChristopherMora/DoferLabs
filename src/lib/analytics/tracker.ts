@@ -89,7 +89,7 @@ class EventTracker {
   toolOpened(toolId: string, metadata?: Record<string, unknown>) {
     this.track({
       toolId,
-      eventType: 'opened',
+      eventType: 'tool_opened',
       metadata,
     })
   }
@@ -97,7 +97,7 @@ class EventTracker {
   toolExecuted(toolId: string, metadata?: Record<string, unknown>) {
     this.track({
       toolId,
-      eventType: 'executed',
+      eventType: 'tool_executed',
       metadata,
     })
   }
@@ -113,7 +113,7 @@ class EventTracker {
   resultExported(toolId: string, format: string) {
     this.track({
       toolId,
-      eventType: 'exported',
+      eventType: 'result_downloaded',
       metadata: { format },
     })
   }
@@ -121,18 +121,25 @@ class EventTracker {
   resultSaved(toolId: string) {
     this.track({
       toolId,
-      eventType: 'saved',
+      eventType: 'result_copied',
     })
   }
 
   error(toolId: string, error: Error) {
     this.track({
       toolId,
-      eventType: 'error',
+      eventType: 'tool_error',
       metadata: {
         message: error.message,
         stack: error.stack,
       },
+    })
+  }
+
+  pageView(path: string, metadata?: Record<string, unknown>) {
+    this.track({
+      eventType: 'page_view',
+      metadata: { path, ...metadata },
     })
   }
 }
