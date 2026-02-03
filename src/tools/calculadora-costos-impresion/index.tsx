@@ -1943,47 +1943,90 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
         </div>
 
         {/* Margen (opcional) */}
-        <div className="space-y-2 border-t pt-4">
-          <label className="block text-sm font-medium text-gray-700">
-            💰 ¿Cuánto quieres ganar por este trabajo? (%)
-            <InfoTooltip text="Este es TU margen de ganancia. Se suma a todos los costos (material + energía + depreciación) para calcular el precio final que le cobrarás al cliente. Ejemplo: costos $100 + 50% ganancia = cobras $150 (te quedas con $50)." />
-          </label>
-          <input
-            type="number"
-            value={inputs.margenGanancia === 0 ? '' : inputs.margenGanancia}
-            onChange={(e) => handleInputChange('margenGanancia', e.target.value === '' ? 0 : parseFloat(e.target.value))}
-            placeholder="Ej: 50"
-            className="w-full px-4 py-3 text-lg font-semibold text-gray-900 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all"
-            min="0"
-            step="5"
-          />
-          {inputs.margenGanancia > 0 && inputs.pesoGramos > 0 && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-green-700 font-medium">Tu ganancia estimada:</span>
-                <span className="text-lg font-bold text-green-600">
-                  {(() => {
-                    // Calcular ganancia estimada rápidamente
-                    const pesoReal = inputs.pesoGramos * (1 + inputs.porcentajeMerma / 100)
-                    const costoMaterial = (pesoReal * inputs.precioKgFilamento) / 1000
-                    const energiaKwh = (inputs.consumoWatts * inputs.horasImpresion) / 1000
-                    const costoEnergia = energiaKwh * inputs.precioKwh
-                    let costoDepreciacion = 0
-                    if (inputs.precioImpresora && inputs.vidaUtilHoras) {
-                      costoDepreciacion = (inputs.precioImpresora / inputs.vidaUtilHoras) * inputs.horasImpresion
-                    }
-                    const costoTotal = costoMaterial + costoEnergia + costoDepreciacion
-                    const ganancia = costoTotal * (inputs.margenGanancia / 100)
-                    return `$${ganancia.toFixed(2)} MXN`
-                  })()}
-                </span>
-              </div>
-              <p className="text-xs text-green-600 mt-1">
-                Precio final = costos + {inputs.margenGanancia}% ganancia
+        <div className="space-y-3 border-t pt-4 bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg">
+          <div className="flex items-start gap-2">
+            <span className="text-2xl">💰</span>
+            <div className="flex-1">
+              <label className="block text-base font-semibold text-gray-800">
+                ¿Cuánto quieres ganar por este trabajo?
+              </label>
+              <p className="text-sm text-gray-600 mt-1">
+                Ingresa el porcentaje de ganancia que quieres obtener sobre tus costos de producción
               </p>
             </div>
+          </div>
+
+          <div className="relative">
+            <input
+              type="number"
+              value={inputs.margenGanancia === 0 ? '' : inputs.margenGanancia}
+              onChange={(e) => handleInputChange('margenGanancia', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+              placeholder="Ejemplo: 50"
+              className="w-full px-4 py-3 text-xl font-bold text-gray-900 border-2 border-green-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all"
+              min="0"
+              step="5"
+            />
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xl font-bold text-gray-400">%</span>
+          </div>
+
+          {/* Preview de la ganancia */}
+          {inputs.margenGanancia > 0 && inputs.pesoGramos > 0 && (
+            <div className="bg-white border-2 border-green-300 rounded-lg p-4 space-y-3">
+              {/* Cálculo rápido */}
+              {(() => {
+                const pesoReal = inputs.pesoGramos * (1 + inputs.porcentajeMerma / 100)
+                const costoMaterial = (pesoReal * inputs.precioKgFilamento) / 1000
+                const energiaKwh = (inputs.consumoWatts * inputs.horasImpresion) / 1000
+                const costoEnergia = energiaKwh * inputs.precioKwh
+                let costoDepreciacion = 0
+                if (inputs.precioImpresora && inputs.vidaUtilHoras) {
+                  costoDepreciacion = (inputs.precioImpresora / inputs.vidaUtilHoras) * inputs.horasImpresion
+                }
+                const costoTotal = costoMaterial + costoEnergia + costoDepreciacion
+                const ganancia = costoTotal * (inputs.margenGanancia / 100)
+                const precioVenta = costoTotal + ganancia
+
+                return (
+                  <>
+                    <div className="text-center pb-3 border-b border-gray-200">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Te quedarás con</p>
+                      <p className="text-3xl font-bold text-green-600">${ganancia.toFixed(2)}</p>
+                      <p className="text-xs text-gray-500 mt-1">de ganancia neta</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="text-center p-2 bg-gray-50 rounded">
+                        <p className="text-gray-600 text-xs mb-1">Tus costos</p>
+                        <p className="font-bold text-gray-900">${costoTotal.toFixed(2)}</p>
+                      </div>
+                      <div className="text-center p-2 bg-green-100 rounded">
+                        <p className="text-green-700 text-xs mb-1">Precio a cobrar</p>
+                        <p className="font-bold text-green-700">${precioVenta.toFixed(2)}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-blue-50 border border-blue-200 rounded p-2 text-xs text-center text-blue-800">
+                      📊 Cobrarás <span className="font-bold">${precioVenta.toFixed(2)}</span>, 
+                      de los cuales <span className="font-bold">${costoTotal.toFixed(2)}</span> cubren tus costos 
+                      y <span className="font-bold text-green-600">${ganancia.toFixed(2)}</span> es tu ganancia ({inputs.margenGanancia}%)
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
           )}
-          <p className="text-xs text-gray-500">💡 Recomendado: 25-40% para piezas estándar, 50-100% para diseños personalizados</p>
+
+          <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded p-2">
+            <span className="text-sm">💡</span>
+            <div className="text-xs text-gray-600 flex-1">
+              <span className="font-semibold">Guía de porcentajes:</span>
+              <ul className="mt-1 space-y-0.5 ml-2">
+                <li>• 25-40%: Piezas simples o producción en serie</li>
+                <li>• 50-80%: Piezas estándar con valor agregado</li>
+                <li>• 100-200%: Diseños personalizados o trabajos complejos</li>
+              </ul>
+            </div>
+          </div>
         </div>
 
         {/* Botón calcular */}
