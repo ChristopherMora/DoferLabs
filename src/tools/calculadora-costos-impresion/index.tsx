@@ -289,7 +289,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
   const [showMaterialComparison, setShowMaterialComparison] = useState<boolean>(false)
 
   /**
-   * Parsea archivos de slicer (.gcode o .3mf) para extraer datos
+   * Parsea archivos de slicer (.gcode.3mf) para extraer datos
    */
   const parseSlicerFile = async (file: File) => {
     setIsImporting(true)
@@ -924,7 +924,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     // Validar archivo con seguridad
     const validation = validateFile(file, {
-      allowedExtensions: ['.gcode', '.3mf'],
+      allowedExtensions: ['.3mf'],
     })
     
     if (!validation.valid) {
@@ -939,9 +939,9 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
     
     const fileName = file.name.toLowerCase()
     
-    // Aceptar .gcode, .3mf, .gcode.3mf
-    if (!fileName.endsWith('.gcode') && !fileName.endsWith('.3mf') && !fileName.includes('.gcode.')) {
-      setErrors({ import: 'Por favor selecciona un archivo .gcode, .3mf o .gcode.3mf' })
+    // Solo aceptar archivos .gcode.3mf
+    if (!fileName.endsWith('.gcode.3mf')) {
+      setErrors({ import: 'Por favor selecciona un archivo .gcode.3mf (exportado desde Bambu Studio, Cura, PrusaSlicer, etc.)' })
       return
     }
     
@@ -1525,7 +1525,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
               : 'border-transparent text-gray-500 hover:text-gray-700'
           }`}
         >
-          📦 GCODE / 3MF
+          📦 Archivo .gcode.3mf
         </button>
         <button
           onClick={() => {
@@ -1575,7 +1575,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
               <div className="flex-1">
                 <h3 className="font-semibold text-emerald-900 mb-1">Importar desde Slicer</h3>
                 <p className="text-sm text-emerald-700 mb-3">
-                  Sube tu archivo <strong>.gcode, .3mf o .gcode.3mf</strong> y autocompletaremos los datos
+                  Sube tu archivo <strong>.gcode.3mf</strong> y autocompletaremos los datos
                 </p>
                 
                 {printerName && (
@@ -1605,7 +1605,7 @@ export default function CalculadoraCostosImpresion({ onComplete, onError }: Tool
                   <span>{isImporting ? 'Procesando...' : 'Elegir archivo'}</span>
                   <input
                     type="file"
-                    accept=".gcode,.GCODE,.3mf,.3MF,text/plain,text/x-gcode,application/x-3mf"
+                    accept=".3mf,.3MF"
                     onChange={handleFileUpload}
                     disabled={isImporting}
                     className="hidden"
