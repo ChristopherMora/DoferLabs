@@ -35,7 +35,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-makerhub}?schema=public
-      NEXT_PUBLIC_APP_URL: https://makerhub.dofer.com.mx
+      NEXT_PUBLIC_APP_URL: https://makerhub.dofer.mx
       # Agregar más variables de entorno según sea necesario
     expose:
       - "3250"
@@ -44,7 +44,7 @@ services:
       - dokploy-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.makerhub.rule=Host(`makerhub.dofer.com.mx`)"
+      - "traefik.http.routers.makerhub.rule=Host(`makerhub.dofer.mx`)"
       - "traefik.http.routers.makerhub.entrypoints=websecure"
       - "traefik.http.routers.makerhub.tls=true"
       - "traefik.http.routers.makerhub.tls.certresolver=letsencrypt"
